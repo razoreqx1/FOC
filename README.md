@@ -84,7 +84,7 @@ When reporting a problem, include:
 - whether another mod recently changed the affected ship; and
 - the relevant portion of the X4 debug log.
 
-Use the repository's [Issues](https://github.com/RazorEQX/FOC/issues) page after checking for an existing report.
+Use the repository's [Issues](https://github.com/razoreqx1/FOC/issues) page after checking for an existing report.
 
 ## Credits
 
