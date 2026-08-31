@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<content id="fleet_operations_command"
+         name="Fleet Operations Command"
+         description="Standalone fleet readiness, doctrine, and response planning for player fleets."
+         author="RazorEQX"
+         version="119"
+         date="2026-08-31"
+         save="false">
+  <text language="44"
+        name="Fleet Operations Command"
+        description="Menu-driven fleet planning, safeguards, and bounded automation." />
+</content>

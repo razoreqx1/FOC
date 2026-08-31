@@ -1,0 +1,18 @@
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.tmp
+
+# X4 runtime and generated catalog files
+debuglog.txt
+ext_*.cat
+ext_*.dat
+
+# Engineering-only material
+Evidence/
+Governance/
+Packages/
+Staging/
+Temp/
