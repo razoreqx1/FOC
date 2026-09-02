@@ -5,6 +5,14 @@ typedef uint64_t UniverseID;
 UniverseID GetPlayerOccupiedShipID(void);
 bool IsComponentOperational(UniverseID componentid);
 float GetTextHeight(const char*const text, const char*const fontname, const float fontsize, const float wordwrapwidth);
+void SetSubordinateGroupDockAtCommander(UniverseID controllableid, int group, bool value);
+bool ShouldSubordinateGroupDockAtCommander(UniverseID controllableid, int group);
+void SetSubordinateGroupReinforceFleet(UniverseID controllableid, int group, bool value);
+bool ShouldSubordinateGroupReinforceFleet(UniverseID controllableid, int group);
+void SetSubordinateGroupRespondToDistressCalls(UniverseID controllableid, int group, bool value);
+bool ShouldSubordinateGroupRespondToDistressCalls(UniverseID controllableid, int group);
+void SetSubordinateGroupResupplyAtFleet(UniverseID controllableid, int group, bool value);
+bool ShouldSubordinateGroupResupplyAtFleet(UniverseID controllableid, int group);
 ]]
 
 local C = ffi.C
@@ -48,6 +56,13 @@ local menu = {
     storyAnsweredIDs = {},
     structuralFleetRows = {},
     structuralIncoming = nil,
+    taskForces = {},
+    templates = {},
+    afterActionReports = {},
+    roadmapIncoming = nil,
+    operations = { retreat = "OFF", retreatHull = 30, retreatReturn = "YES", commanderHull = 50, fleetHull = 50, captainCoverage = 100, maxFleetSize = 100, preset = "MANUAL ORDERS ONLY" },
+    taskForce = { selected = 1, fleetChoice = 1, memberChoice = 1, name = "TASK FORCE ALPHA", priority = "NORMAL", zone = "NORMAL", coverage = "HOME SECTOR ONLY", rotation = "MANUAL" },
+    templateChoice = 1,
     pendingActionKind = nil,
     pendingHomeSelection = nil,
     homeReturnMetadata = nil,
@@ -62,6 +77,8 @@ local menu = {
     renderedPage = nil,
     restoreTopRow = nil,
     closeInProgress = false,
+    workflowPointersVisible = true,
+    fleetFinder = "ALL FLEETS",
     listPages = {},
     listContentHeight = nil,
     phase = { readiness = "overview", fleets = "registry", response = "rules", settings = "automation" },
@@ -97,11 +114,13 @@ local availableActionBackground = { r = 49, g = 69, b = 83, a = 60 }
 local confirmedActionBackground = { r = 20, g = 92, b = 48, a = 100 }
 local requiredActionBackground = { r = 125, g = 82, b = 12, a = 100 }
 local failedActionBackground = { r = 105, g = 32, b = 32, a = 100 }
+local pointerActionBackground = { r = 92, g = 48, b = 145, a = 100 }
 local rebuild
 
 local tabs = {
     { id = "command", label = "COMMAND" },
     { id = "fleets", label = "FLEETS" },
+    { id = "taskforces", label = "TASK FORCES" },
     { id = "readiness", label = "READINESS" },
     { id = "academy", label = "TRAINING ACADEMY" },
     { id = "store", label = "ACADEMY STORE" },
@@ -113,6 +132,7 @@ local tabs = {
 local guides = {
     command = "Preview, approve, or stop bounded FOC planning. Unknown evidence always blocks mutation.",
     fleets = "Choose one fleet, configure its proven orders and response rules, or open Repair / Replace / Rebuild for native maintenance.",
+    taskforces = "Build up to eight save-backed defense groups without changing X4's native fleet hierarchy.",
     readiness = "Missing and unknown evidence are blockers. No unknown value is counted as ready.",
     academy = "Recruit up to 25 combined Pilot and Marine trainees, train them, then assign them to proven destinations.",
     store = "Buy Pilot Lessons or Marine Credits with credits. Every purchase is verified before FOC reports success.",
@@ -129,6 +149,11 @@ local urgencyOptions = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
 local damageOptions = { 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 }
 local repairThresholdOptions = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100 }
 local responseFleetCapOptions = { 1, 5, 10, 20, 50, 100 }
+local taskForceNames = { "TASK FORCE ALPHA", "TASK FORCE BRAVO", "TASK FORCE CHARLIE", "TASK FORCE DELTA", "TASK FORCE ECHO", "TASK FORCE FOXTROT", "TASK FORCE GUARDIAN", "TASK FORCE SENTINEL" }
+local taskForcePriorities = { "HIGH", "NORMAL", "EXCLUDED" }
+local rotationModes = { "MANUAL", "FULL AUTOMATION" }
+local automationPresets = { "PROTECT HOME", "GUARD TRADERS", "DEFEND STATIONS", "HUNT PIRATES", "STAY SAFE", "MANUAL ORDERS ONLY" }
+local fleetFinderOptions = { "ALL FLEETS", "A-F", "G-L", "M-R", "S-Z" }
 
 local function normalizeFleetRole(value)
     local text = tostring(value or "")
@@ -316,7 +341,9 @@ local function needsAction(value)
     local text = string.upper(tostring(value or ""))
     return text:find("BLOCKED", 1, true) ~= nil or text:find("ACTION REQUIRED", 1, true) ~= nil or
         text:find("NOT SENT", 1, true) ~= nil or text:find("NOT APPLIED", 1, true) ~= nil or
-        text:find("NOT SAVED", 1, true) ~= nil or text:find("NEEDS ATTENTION", 1, true) ~= nil
+        text:find("NOT SAVED", 1, true) ~= nil or text:find("NEEDS ATTENTION", 1, true) ~= nil or
+        text:find("PROCESSING", 1, true) ~= nil or text:find("PENDING", 1, true) ~= nil or
+        text:find("WAITING", 1, true) ~= nil
 end
 
 local function toComponent64(value)
@@ -572,7 +599,7 @@ local function returnFromHomeMap(value)
         if not sectorKey then
             menu.pendingHomeSelection = nil
             menu.plan.lastResult = "HOME POINT NOT CHANGED - SECTOR IDENTITY IS UNKNOWN"
-            DebugError("[FOC][B035][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
+            DebugError("[FOC][B040][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
         else
             menu.homeSectorByFleet[pending.fleetKey] = {
                 id = sectorKey,
@@ -581,11 +608,11 @@ local function returnFromHomeMap(value)
             }
             markFleetOrdersChanged(pending.fleetKey, ordersForFleet(pending.fleetKey))
             menu.plan.lastResult = "HOME POINT CHOSEN - DRAFT NOT YET SAVED - NO ORDERS SENT"
-            DebugError("[FOC][B035][HOME_MAP_SELECTED] fleet=" .. pending.fleetAudit .. " sector=" .. sectorName .. " sector_key=" .. sectorKey .. " mutation=NONE")
+            DebugError("[FOC][B040][HOME_MAP_SELECTED] fleet=" .. pending.fleetAudit .. " sector=" .. sectorName .. " sector_key=" .. sectorKey .. " mutation=NONE")
         end
     else
         menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP RETURN WAS INVALID - NO ORDERS SENT"
-        DebugError("[FOC][B035][HOME_MAP_INVALID] mutation=NONE")
+        DebugError("[FOC][B040][HOME_MAP_INVALID] mutation=NONE")
     end
     menu.pendingHomeSelection = nil
     local mapMenu = menuByName("MapMenu")
@@ -623,7 +650,7 @@ local function installInteractHomeHook()
         return result
     end
     interactMenu.focHomeHookInstalled = true
-    DebugError("[FOC][B035][INTERACT_HOME_HOOK] installed=true mutation=NONE")
+    DebugError("[FOC][B040][INTERACT_HOME_HOOK] installed=true mutation=NONE")
     return true
 end
 
@@ -680,6 +707,83 @@ local function directSubordinates(ship)
         end
     end
     return converted
+end
+
+local groupPolicyContracts = {
+    dock = { label = "Dock with commander", set = C.SetSubordinateGroupDockAtCommander, get = C.ShouldSubordinateGroupDockAtCommander },
+    reinforce = { label = "Replace losses using X4 fleet reinforcement", set = C.SetSubordinateGroupReinforceFleet, get = C.ShouldSubordinateGroupReinforceFleet },
+    distress = { label = "Respond to X4 distress calls", set = C.SetSubordinateGroupRespondToDistressCalls, get = C.ShouldSubordinateGroupRespondToDistressCalls },
+    resupply = { label = "Resupply at fleet", set = C.SetSubordinateGroupResupplyAtFleet, get = C.ShouldSubordinateGroupResupplyAtFleet },
+}
+
+local function fleetSubordinateGroups(selected)
+    local groups, seen = {}, {}
+    local commander = selected and selected.commander and bridgeComponent64(selected.commander.object)
+    if not commander then return commander, groups end
+    for _, subordinate in ipairs(directSubordinates(commander)) do
+        local ok, group = pcall(GetComponentData, subordinate, "subordinategroup")
+        group = ok and tonumber(group) or nil
+        if group and group >= 1 and group <= 10 and not seen[group] then
+            seen[group] = true
+            groups[#groups + 1] = group
+        end
+    end
+    table.sort(groups)
+    return commander, groups
+end
+
+local function fleetGroupPolicyState(selected, policy)
+    local contract = groupPolicyContracts[policy]
+    local commander, groups = fleetSubordinateGroups(selected)
+    if not contract or not commander or #groups == 0 then return "UNAVAILABLE", 0, 0 end
+    local enabled = 0
+    for _, group in ipairs(groups) do
+        local ok, value = pcall(contract.get, commander, group)
+        if not ok then return "UNKNOWN", enabled, #groups end
+        if value == true then enabled = enabled + 1 end
+    end
+    if enabled == #groups then return "YES", enabled, #groups end
+    if enabled == 0 then return "NO", enabled, #groups end
+    return "MIXED", enabled, #groups
+end
+
+local function setFleetGroupPolicy(selected, policy, enabled)
+    local contract = groupPolicyContracts[policy]
+    local commander, groups = fleetSubordinateGroups(selected)
+    if not contract or not commander or #groups == 0 or selected.missionProtected or selected.commander.playerOccupied then
+        return false, "BLOCKED - NO SAFE CURRENT SUBORDINATE GROUPS WERE PROVEN"
+    end
+    local original = {}
+    for _, group in ipairs(groups) do
+        local ok, value = pcall(contract.get, commander, group)
+        if not ok or type(value) ~= "boolean" then
+            return false, "BLOCKED - NATIVE PRE-CHANGE STATE COULD NOT BE PROVEN"
+        end
+        original[group] = value
+    end
+    local function rollback()
+        local restored = true
+        for _, group in ipairs(groups) do
+            local setOK = pcall(contract.set, commander, group, original[group])
+            local getOK, value = pcall(contract.get, commander, group)
+            if not setOK or not getOK or value ~= original[group] then restored = false end
+        end
+        return restored
+    end
+    for _, group in ipairs(groups) do
+        local ok = pcall(contract.set, commander, group, enabled == true)
+        if not ok then
+            local restored = rollback()
+            return false, "BLOCKED - X4 REJECTED THE NATIVE GROUP POLICY CHANGE | ROLLBACK " .. (restored and "CONFIRMED" or "UNKNOWN")
+        end
+    end
+    local state, matched, total = fleetGroupPolicyState(selected, policy)
+    local expected = enabled and "YES" or "NO"
+    if state ~= expected then
+        local restored = rollback()
+        return false, "BLOCKED - NATIVE READBACK DID NOT MATCH | " .. tostring(matched) .. " OF " .. tostring(total) .. " GROUPS ENABLED | ROLLBACK " .. (restored and "CONFIRMED" or "UNKNOWN")
+    end
+    return true, string.upper(contract.label) .. " = " .. expected .. " | NATIVE READBACK MATCHED FOR " .. tostring(total) .. " GROUP(S)"
 end
 
 local function pilotEvidence(ship)
@@ -826,7 +930,7 @@ local function sampleFleets(reason)
     })
     while #menu.history > HISTORY_LIMIT do table.remove(menu.history) end
     menu.selectedFleet = clamp(menu.selectedFleet, 1, math.max(1, #fleets))
-    DebugError("[FOC][B035][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(shipsExamined) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " source=MD_STRUCTURAL_ALLSUBORDINATES authoritative=1 mutation=NONE")
+    DebugError("[FOC][B040][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(shipsExamined) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " source=MD_STRUCTURAL_ALLSUBORDINATES authoritative=1 mutation=NONE")
 end
 
 local function loadStructuralFleetRows(rows)
@@ -858,6 +962,29 @@ function menu.structuralSnapshotRowCommit()
     if row[2] == nil or row[3] == "" or #row[5] ~= row.expected then incoming.failed = true else table.insert(incoming.rows, row) end
     incoming.current = nil
 end
+
+function menu.roadmapBegin() menu.roadmapIncoming = { forces = {}, templates = {}, current = nil, policy = nil } end
+function menu.roadmapForceBegin() if menu.roadmapIncoming then menu.roadmapIncoming.current = { nil, nil, nil, nil, nil, nil, nil, nil, {} } end end
+function menu.roadmapForceID(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[1] = tostring(value) end end
+function menu.roadmapForceName(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[2] = tostring(value) end end
+function menu.roadmapForcePriority(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[3] = tostring(value) end end
+function menu.roadmapForceZone(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[4] = tostring(value) end end
+function menu.roadmapForceCoverage(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[5] = tostring(value) end end
+function menu.roadmapForceRotation(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then menu.roadmapIncoming.current[6] = tostring(value) end end
+function menu.roadmapForceActive(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current and tostring(value or "") ~= "" then menu.roadmapIncoming.current[7] = tostring(value) end end
+function menu.roadmapForceReserve(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current and tostring(value or "") ~= "" then menu.roadmapIncoming.current[8] = tostring(value) end end
+function menu.roadmapForceMember(_, value) if menu.roadmapIncoming and menu.roadmapIncoming.current then table.insert(menu.roadmapIncoming.current[9], tostring(value)) end end
+function menu.roadmapForceCommit() if menu.roadmapIncoming and menu.roadmapIncoming.current then table.insert(menu.roadmapIncoming.forces, menu.roadmapIncoming.current); menu.roadmapIncoming.current = nil end end
+function menu.roadmapTemplateRow(_, value) if menu.roadmapIncoming and type(value) == "table" then table.insert(menu.roadmapIncoming.templates, value) end end
+function menu.roadmapPolicy(_, value) if menu.roadmapIncoming and type(value) == "table" then menu.roadmapIncoming.policy = value end end
+function menu.roadmapComplete()
+    if not menu.roadmapIncoming then return end
+    menu.taskForces = menu.roadmapIncoming.forces
+    menu.templates = menu.roadmapIncoming.templates
+    local policy = menu.roadmapIncoming.policy
+    if policy then menu.operations.retreat = tostring(policy[2]); menu.operations.retreatHull = tonumber(policy[3]) or 30; menu.operations.retreatReturn = tostring(policy[4]); menu.operations.commanderHull = tonumber(policy[5]) or 50; menu.operations.fleetHull = tonumber(policy[6]) or 50; menu.operations.captainCoverage = tonumber(policy[7]) or 100; menu.operations.maxFleetSize = tonumber(policy[8]) or 100; menu.operations.preset = tostring(policy[9]) end
+    menu.roadmapIncoming = nil
+end
 function menu.structuralSnapshotComplete()
     local incoming = menu.structuralIncoming
     menu.structuralIncoming = nil
@@ -883,6 +1010,22 @@ local function textRow(tableWidget, label, value, color)
     row[2]:setColSpan(3):createText(safeText(value), { wordwrap = true, color = color })
 end
 
+local function workflowLabel(value, active)
+    local text = safeText(value)
+    if not menu.workflowPointersVisible or active ~= true then return text end
+    local guided = text:find("^CREATE ") or text:find("^PREVIEW ") or text:find("^APPROVE ")
+        or text:find("^ADD SELECTED ") or text:find("^MAKE ACTIVE ") or text:find("^MAKE RESERVE ")
+        or text:find("^SAVE ") or text:find("^SEND THIS ") or text:find("^CONFIRM:")
+        or text:find("^ROTATE ACTIVE ") or text == "OPEN X4 NATIVE REPAIR SCREEN"
+    return guided and ("-> " .. text) or text
+end
+
+local function beginButtonFeedback(value)
+    local label = safeText(value, "ACTION")
+    menu.notice = "BUTTON CLICKED - " .. label .. " | FOC IS PROCESSING OR HAS OPENED THE REQUESTED SCREEN"
+    menu.plan.lastResult = menu.notice
+end
+
 local function actionRow(tableWidget, label, value, handler, active, color)
     local row = tableWidget:addRow(true)
     row[1]:createText(label, { color = neutralColor })
@@ -893,8 +1036,13 @@ local function actionRow(tableWidget, label, value, handler, active, color)
     elseif color == headingColor then properties.bgColor = normalActionBackground
     elseif color == activeTabBackground then properties.bgColor = activeTabBackground
     elseif color then properties.bgColor = availableActionBackground end
-    row[2]:setColSpan(3):createButton(properties):setText(safeText(value), { halign = "center" })
-    if active == true then row[2].handlers.onClick = handler end
+    row[2]:setColSpan(3):createButton(properties):setText(workflowLabel(value, active), { halign = "center" })
+    if active == true then
+        row[2].handlers.onClick = function()
+            beginButtonFeedback(value)
+            handler()
+        end
+    end
 end
 
 local function actionRequired(tableWidget, what, why, nextStep, targetPage, buttonText, safetyText)
@@ -935,11 +1083,21 @@ local function buttonPairRow(tableWidget, leftText, leftHandler, rightText, righ
     if leftActive == nil then leftActive = true end
     if rightActive == nil then rightActive = true end
     local row = tableWidget:addRow(true)
-    row[1]:setColSpan(2):createButton({ active = leftActive }):setText(leftText, { halign = "center" })
-    if leftActive then row[1].handlers.onClick = leftHandler end
+    row[1]:setColSpan(2):createButton({ active = leftActive }):setText(workflowLabel(leftText, leftActive), { halign = "center" })
+    if leftActive then
+        row[1].handlers.onClick = function()
+            beginButtonFeedback(leftText)
+            leftHandler()
+        end
+    end
     local mapped = rightColor == warningColor and requiredActionBackground or rightColor == passColor and confirmedActionBackground or normalActionBackground
-    row[3]:setColSpan(2):createButton({ active = rightActive, bgColor = mapped }):setText(rightText, { halign = "center" })
-    if rightActive then row[3].handlers.onClick = rightHandler end
+    row[3]:setColSpan(2):createButton({ active = rightActive, bgColor = mapped }):setText(workflowLabel(rightText, rightActive), { halign = "center" })
+    if rightActive then
+        row[3].handlers.onClick = function()
+            beginButtonFeedback(rightText)
+            rightHandler()
+        end
+    end
 end
 
 local function auditAction(kind, detail, result, state, persistentData)
@@ -1114,7 +1272,7 @@ local function requestFleetDraftSave(selected, key, orders, home)
     if menu.pendingDraftSaves[key] then
         menu.plan.lastResult = "DRAFT SAVE ALREADY PENDING - WAITING FOR PERSISTENT READBACK"
         menu.notice = menu.plan.lastResult
-        DebugError("[FOC][B035][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
+        DebugError("[FOC][B040][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
         rebuild(false)
         return
     end
@@ -1150,7 +1308,7 @@ local function requestFleetDraftSave(selected, key, orders, home)
     menu.plan.lastState = "SAVE_PENDING"
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B035][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
+    DebugError("[FOC][B040][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
     rebuild(false)
 end
 
@@ -1202,7 +1360,7 @@ local function requestFleetPatrolStart(selected, key, orders, home)
     menu.plan.lastState = payload[5]
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B035][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
+    DebugError("[FOC][B040][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
     rebuild(false)
 end
 
@@ -1236,7 +1394,7 @@ local function draftSaveComplete()
         menu.history[1].state = state
         menu.history[1].result = result
     end
-    DebugError("[FOC][B035][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
+    DebugError("[FOC][B040][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
     menu.draftReadback = { key = nil, result = nil, state = nil }
     if menu.frame then rebuild(false) end
 end
@@ -1340,11 +1498,11 @@ local function academySnapshotComplete()
     local incoming = menu.academyIncoming
     menu.academyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadAcademyRows(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1362,7 +1520,7 @@ local function protectedSnapshotComplete()
     local incoming = menu.protectedIncoming
     menu.protectedIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         if menu.plan.lastState == "REFRESH_PENDING" then
             menu.plan.lastState = "BLOCKED"
             menu.plan.lastResult = "REFRESH BLOCKED - PROTECTED SHIP SNAPSHOT WAS INCOMPLETE | PRIOR PROTECTION CACHE PRESERVED"
@@ -1372,7 +1530,7 @@ local function protectedSnapshotComplete()
         return
     end
     loadProtectedShipIDs(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then
         sampleFleets("MD_PROTECTION_REFRESH")
         if menu.plan.lastState == "REFRESH_PENDING" then
@@ -1398,11 +1556,11 @@ local function storyOverrideSnapshotComplete()
     local incoming = menu.storyOverrideIncoming
     menu.storyOverrideIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=STORY_OVERRIDES cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=STORY_OVERRIDES cache=PRESERVED")
         return
     end
     loadStoryOverrideIDs(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=STORY_OVERRIDES rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=STORY_OVERRIDES rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then sampleFleets("MD_STORY_OVERRIDE_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
 end
 
@@ -1420,11 +1578,11 @@ function menu.storyAnsweredSnapshotComplete()
     local incoming = menu.storyAnsweredIncoming
     menu.storyAnsweredIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=STORY_ANSWERED cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=STORY_ANSWERED cache=PRESERVED")
         return
     end
     loadStoryAnsweredIDs(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=STORY_ANSWERED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=STORY_ANSWERED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then sampleFleets("MD_STORY_ANSWERED_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
 end
 
@@ -1455,11 +1613,11 @@ local function vacancySnapshotComplete()
     local incoming = menu.vacancyIncoming
     menu.vacancyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadVacancyRows(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1494,11 +1652,11 @@ local function marineTargetSnapshotComplete()
     local incoming = menu.marineTargetIncoming
     menu.marineTargetIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=MARINE_TARGET expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=MARINE_TARGET expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadMarineTargetRows(incoming.rows)
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=MARINE_TARGET rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=MARINE_TARGET rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1521,7 +1679,7 @@ local function storeSnapshotComplete()
     if not menu.storeIncoming then return end
     menu.store = menu.storeIncoming
     menu.storeIncoming = nil
-    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=ACADEMY_STORE tiers=5 balance=" .. tostring(menu.store.balance))
+    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=ACADEMY_STORE tiers=5 balance=" .. tostring(menu.store.balance))
     if menu.frame and not menu.pendingActionKind then rebuild(false) end
 end
 
@@ -1603,12 +1761,21 @@ end
 local function createHeader(frame, width)
     local titleHeight = Helper.scaleY(42)
     local tabHeight = Helper.scaleY(38)
-    local headerHeight = titleHeight + tabHeight
+    local feedbackHeight = Helper.scaleY(Helper.standardTextHeight + 8)
+    local headerHeight = titleHeight + tabHeight + feedbackHeight
     local header = frame:addTable(10, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
     local title = header:addRow(true, { fixed = true })
     local screenTitle = menu.page == "fleets" and "FLEET ORDERS" or "PLAN CONTROL"
     local buildLabel = safeText(menu.param and menu.param[4], "FOC Build UNKNOWN"):gsub("^FOC%s+", ""):upper()
-    title[1]:setColSpan(9):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
+    title[1]:setColSpan(7):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
+    title[8]:setColSpan(2):createButton({ active = true, bgColor = pointerActionBackground }):setText(menu.workflowPointersVisible and "CLEAR NEXT-STEP POINTERS" or "SHOW NEXT-STEP POINTERS", { halign = "center" })
+    title[8].handlers.onClick = function()
+        menu.workflowPointersVisible = not menu.workflowPointersVisible
+        menu.notice = menu.workflowPointersVisible and "NEXT-STEP POINTERS ARE NOW SHOWN" or "NEXT-STEP POINTERS ARE NOW HIDDEN"
+        menu.plan.lastResult = menu.notice
+        menu.plan.lastState = "DISPLAY_UPDATED"
+        rebuild(false)
+    end
     title[10]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
     title[10].handlers.onClick = function() menu.onCloseElement("close") end
     local tabRow = header:addRow(true, { fixed = true })
@@ -1630,6 +1797,13 @@ local function createHeader(frame, width)
         AddUITriggeredEvent(menu.name, "refresh", nil)
         rebuild(true)
     end
+    local feedbackRow = header:addRow(false, { fixed = true })
+    local feedback = menu.notice or "READY - CHOOSE AN ACTION"
+    if #feedback > 180 then feedback = feedback:sub(1, 177) .. "..." end
+    feedbackRow[1]:setColSpan(10):createText("LAST ACTION: " .. feedback, {
+        halign = "center",
+        color = needsAction(feedback) and warningColor or passColor,
+    })
     header.properties.maxVisibleHeight = headerHeight
     return headerHeight
 end
@@ -1714,7 +1888,11 @@ end
 
 local function fleetSelectorPane(tableWidget)
     section(tableWidget, "CHOOSE A FLEET")
-    textRow(tableWidget, "Scope", "All structurally eligible combat fleets from authoritative MD discovery are shown.", headingColor)
+    textRow(tableWidget, "Scope", "Use the alphabetical finder to narrow all structurally eligible combat fleets from authoritative MD discovery.", headingColor)
+    dropdownRow(tableWidget, "Fleet finder", fleetFinderOptions, menu.fleetFinder, function(value)
+        menu.fleetFinder = tostring(value)
+        menu.listPages["fleets.registry"] = 1
+    end)
     actionRow(tableWidget, "Fleet tools", menu.fleetMode == "maintenance" and "BACK TO FLEET ORDERS" or "REPAIR / REPLACE / REBUILD", function()
         menu.fleetMode = menu.fleetMode == "maintenance" and "orders" or "maintenance"
         menu.maintenance.previewCommanderID = nil
@@ -1726,12 +1904,29 @@ local function fleetSelectorPane(tableWidget)
     end, true, menu.fleetMode == "thresholds" and passColor or warningColor)
     local visibleFleets = {}
     for index, fleet in ipairs(menu.sample.fleets) do
-        if menu.showNonCombat or fleet.commander.primarypurpose == "fight" then table.insert(visibleFleets, { index = index, fleet = fleet }) end
+        local name = tostring(fleet.commander.fleetname or ""):upper()
+        local firstLetter = name:sub(1, 1)
+        local finderMatch = menu.fleetFinder == "ALL FLEETS"
+            or (menu.fleetFinder == "A-F" and firstLetter >= "A" and firstLetter <= "F")
+            or (menu.fleetFinder == "G-L" and firstLetter >= "G" and firstLetter <= "L")
+            or (menu.fleetFinder == "M-R" and firstLetter >= "M" and firstLetter <= "R")
+            or (menu.fleetFinder == "S-Z" and firstLetter >= "S" and firstLetter <= "Z")
+        if finderMatch and (menu.showNonCombat or fleet.commander.primarypurpose == "fight") then table.insert(visibleFleets, { index = index, fleet = fleet }) end
     end
+    table.sort(visibleFleets, function(a, b)
+        local an = tostring(a.fleet.commander.fleetname or ""):upper()
+        local bn = tostring(b.fleet.commander.fleetname or ""):upper()
+        if an ~= bn then return an < bn end
+        return tostring(a.fleet.commander.idcode or "") < tostring(b.fleet.commander.idcode or "")
+    end)
+    if #visibleFleets == 0 then textRow(tableWidget, "Finder result", "NO FLEETS MATCH " .. menu.fleetFinder .. " - CHOOSE ALL FLEETS OR ANOTHER LETTER RANGE", warningColor) end
     if not menu.showNonCombat and menu.sample.fleets[menu.selectedFleet] and menu.sample.fleets[menu.selectedFleet].commander.primarypurpose ~= "fight" and visibleFleets[1] then menu.selectedFleet = visibleFleets[1].index end
-    local first, last, _, pageCount = addPager(tableWidget, "fleets.registry", #visibleFleets, { fixedRows = 6, contentPixels = menu.listContentHeight, maximum = 16 })
+    local selectedVisible = false
+    for _, entry in ipairs(visibleFleets) do if entry.index == menu.selectedFleet then selectedVisible = true; break end end
+    if not selectedVisible and visibleFleets[1] then menu.selectedFleet = visibleFleets[1].index end
+    local first, last, _, pageCount = addPager(tableWidget, "fleets.registry", #visibleFleets, { fixedRows = 8, contentPixels = menu.listContentHeight, maximum = 16 })
     local selectedRow = nil
-    local rowsBeforeFleets = 4 + (pageCount > 1 and 1 or 0)
+    local rowsBeforeFleets = 5 + (pageCount > 1 and 1 or 0)
     for visibleIndex = first, last do
         local entry = visibleFleets[visibleIndex]
         local fleet = entry and entry.fleet
@@ -1757,6 +1952,103 @@ local function fleetSelectorPane(tableWidget)
         end
     end
     if selectedRow then pcall(tableWidget.setSelectedRow, tableWidget, selectedRow) end
+end
+
+function menu.taskForcesPage(tableWidget)
+    section(tableWidget, "NAMED TASK FORCES")
+    textRow(tableWidget, "Scope", "FOC groups saved fleet identities only. It never changes X4's native fleet hierarchy.", passColor)
+    textRow(tableWidget, "Capacity", tostring(#menu.taskForces) .. " / 8 TASK FORCES", #menu.taskForces < 8 and neutralColor or warningColor)
+    local usedNames, nextName = {}, nil
+    for _, force in ipairs(menu.taskForces) do usedNames[tostring(force[2] or "")] = true end
+    for _, name in ipairs(taskForceNames) do if not usedNames[name] then nextName = name; break end end
+    actionRow(tableWidget, "Create", nextName and "CREATE " .. nextName or "LIMIT REACHED - 8 UNIQUE TASK FORCES", function()
+        auditAction("TASK_FORCE_CREATE", nextName, "CREATION REQUEST SENT - SAVE READBACK REQUIRED", "TASK_FORCE_PENDING")
+    end, nextName ~= nil and #menu.taskForces < 8 and not menu.pendingActionKind, headingColor)
+    if #menu.taskForces == 0 then
+        textRow(tableWidget, "Start here", "Create a Task Force, then add proven fleets by stable commander identity.", warningColor)
+        return
+    end
+    menu.taskForce.selected = clamp(menu.taskForce.selected, 1, #menu.taskForces)
+    local labels = {}
+    for index, force in ipairs(menu.taskForces) do labels[index] = tostring(force[2]) .. " [" .. tostring(force[1]) .. "]" end
+    dropdownRow(tableWidget, "Task Force", labels, labels[menu.taskForce.selected], function(value)
+        for index, label in ipairs(labels) do if label == value then menu.taskForce.selected = index; rebuild(false); return end end
+    end)
+    local force = menu.taskForces[menu.taskForce.selected]
+    local members = type(force[9]) == "table" and force[9] or {}
+    menu.taskForce.name = tostring(force[2] or taskForceNames[menu.taskForce.selected])
+    menu.taskForce.priority = tostring(force[3] or "NORMAL")
+    menu.taskForce.zone = tostring(force[4] or "NORMAL")
+    menu.taskForce.coverage = normalizeCoverage(force[5])
+    menu.taskForce.rotation = tostring(force[6] or "MANUAL")
+    section(tableWidget, "DEFENSE PLAN")
+    dropdownRow(tableWidget, "Name", taskForceNames, menu.taskForce.name, function(value) menu.taskForce.name = tostring(value); return false end)
+    dropdownRow(tableWidget, "Response priority", taskForcePriorities, menu.taskForce.priority, function(value) menu.taskForce.priority = tostring(value); return false end)
+    dropdownRow(tableWidget, "Home-sector zone", taskForcePriorities, menu.taskForce.zone, function(value) menu.taskForce.zone = tostring(value); return false end)
+    dropdownRow(tableWidget, "Response range", coverageRanges, menu.taskForce.coverage, function(value) menu.taskForce.coverage = normalizeCoverage(value); return false end)
+    dropdownRow(tableWidget, "Rotation", rotationModes, menu.taskForce.rotation, function(value) menu.taskForce.rotation = tostring(value); return false end)
+    actionRow(tableWidget, "Save plan", "SAVE TASK FORCE DEFENSE PLAN", function()
+        auditAction("TASK_FORCE_SAVE", tostring(force[1]), "DEFENSE PLAN SAVE REQUESTED - PERSISTENT READBACK REQUIRED", "TASK_FORCE_PENDING", { menu.taskForce.name, menu.taskForce.priority, menu.taskForce.zone, menu.taskForce.coverage, menu.taskForce.rotation })
+    end, not menu.pendingActionKind, passColor)
+    section(tableWidget, "MEMBER FLEETS")
+    local fleetLabels, fleetIDs = {}, {}
+    for index, fleet in ipairs(menu.sample and menu.sample.fleets or {}) do
+        fleetLabels[index] = fleet.commander.fleetname .. " [" .. fleet.commander.idcode .. "]"
+        fleetIDs[index] = fleet.commander.idcode
+    end
+    menu.taskForce.fleetChoice = clamp(menu.taskForce.fleetChoice, 1, math.max(1, #fleetLabels))
+    if #fleetLabels > 0 then
+        dropdownRow(tableWidget, "Proven fleet", fleetLabels, fleetLabels[menu.taskForce.fleetChoice], function(value)
+            for index, label in ipairs(fleetLabels) do if label == value then menu.taskForce.fleetChoice = index; return end end
+        end)
+        actionRow(tableWidget, "Membership", "ADD SELECTED FLEET TO THIS TASK FORCE", function()
+            auditAction("TASK_FORCE_ADD", tostring(force[1]), "MEMBERSHIP REQUEST SENT - UNIQUE STABLE-ID READBACK REQUIRED", "TASK_FORCE_PENDING", fleetIDs[menu.taskForce.fleetChoice])
+        end, #members < 100 and not menu.pendingActionKind, headingColor)
+    else
+        textRow(tableWidget, "Proven fleet", "NO CURRENT STRUCTURALLY PROVEN FLEET", warningColor)
+    end
+    textRow(tableWidget, "Member count", #members > 0 and (tostring(#members) .. " SAVED FLEET IDENTITY/IDENTITIES") or "NO MEMBER FLEETS", #members > 0 and neutralColor or warningColor)
+    if #members > 0 then
+        menu.taskForce.memberChoice = clamp(menu.taskForce.memberChoice, 1, #members)
+        dropdownRow(tableWidget, "Selected member", members, members[menu.taskForce.memberChoice], function(value)
+            for index, id in ipairs(members) do if id == value then menu.taskForce.memberChoice = index; return end end
+        end)
+        local chosen = members[menu.taskForce.memberChoice]
+        local chosenFleet = nil
+        for _, fleet in ipairs(menu.sample and menu.sample.fleets or {}) do
+            if fleet.commander.idcode == chosen then chosenFleet = fleet; break end
+        end
+        if chosenFleet then
+            textRow(tableWidget, "Commander evidence", chosenFleet.commander.name .. " [" .. chosen .. "] | CAPTAIN " .. chosenFleet.commander.captainState .. " | HULL " .. percent(chosenFleet.commander.hull) .. " | " .. tostring(chosenFleet.missingCaptains) .. " SUBORDINATE CAPTAIN VACANCY/VACANCIES", chosenFleet.commander.captainState == "PRESENT" and neutralColor or warningColor)
+            textRow(tableWidget, "Academy eligibility", chosenFleet.commander.captainState == "MISSING" and "PROVEN COMMANDER VACANCY - THE ACADEMY MAY ASSIGN A TRAINED PILOT AFTER ITS OWN PREVIEW AND READBACK" or "NO PROVEN COMMANDER VACANCY - ACADEMY WILL NOT REPLACE THIS CAPTAIN", chosenFleet.commander.captainState == "MISSING" and warningColor or passColor)
+        else
+            textRow(tableWidget, "Commander evidence", "SAVED MEMBER IS NOT IN THE CURRENT STRUCTURAL FLEET SNAPSHOT - NO MUTATION IS AUTHORIZED", warningColor)
+        end
+        buttonPairRow(tableWidget,
+            "MAKE ACTIVE FLEET", function() auditAction("TASK_FORCE_SET_ACTIVE", tostring(force[1]), "ACTIVE-FLEET SAVE REQUESTED", "TASK_FORCE_PENDING", chosen) end,
+            "MAKE RESERVE FLEET", function() auditAction("TASK_FORCE_SET_RESERVE", tostring(force[1]), "RESERVE-FLEET SAVE REQUESTED", "TASK_FORCE_PENDING", chosen) end,
+            warningColor, not menu.pendingActionKind, not menu.pendingActionKind)
+        actionRow(tableWidget, "Remove", "REMOVE SELECTED MEMBER FROM THIS TASK FORCE", function()
+            auditAction("TASK_FORCE_REMOVE", tostring(force[1]), "MEMBER REMOVAL REQUESTED", "TASK_FORCE_PENDING", chosen)
+        end, not menu.pendingActionKind, warningColor)
+    end
+    textRow(tableWidget, "Active fleet", safeText(force[7], "NOT CHOSEN"), force[7] and passColor or warningColor)
+    textRow(tableWidget, "Reserve fleet", safeText(force[8], "NOT CHOSEN"), force[8] and passColor or warningColor)
+    actionRow(tableWidget, "Rotate", force[7] and force[8] and "ROTATE ACTIVE AND RESERVE - REVALIDATE AND HAND OFF ORDERS" or "CHOOSE ACTIVE AND RESERVE FLEETS FIRST", function()
+        auditAction("TASK_FORCE_ROTATE", tostring(force[1]), "ROTATION REQUEST SENT - EXACT ORDER AND ROLE READBACK REQUIRED", "ROTATION_PENDING")
+    end, force[7] ~= nil and force[8] ~= nil and not menu.pendingActionKind, warningColor)
+    section(tableWidget, "CONNECTED OPERATIONS")
+    actionRow(tableWidget, "Replacement ledger", "OPEN REPAIR / REPLACE / REBUILD", function() menu.page = "fleets"; menu.fleetMode = "maintenance"; rebuild(false) end, true, headingColor)
+    actionRow(tableWidget, "Commander development", "OPEN TRAINING ACADEMY", function() menu.page = "academy"; rebuild(false) end, true, headingColor)
+end
+
+function menu.applyPreset(orders, preset)
+    if preset == "PROTECT HOME" then orders.fleetRole = "GUARD HOME"; orders.coverage = "HOME SECTOR ONLY"; orders.respondShips = "YES"; orders.respondStations = "YES"; orders.distressUrgency = 5; orders.shipDamage = 70; orders.stationDamage = 70
+    elseif preset == "GUARD TRADERS" then orders.fleetRole = "PATROL"; orders.coverage = "TWO GATES"; orders.respondShips = "YES"; orders.respondStations = "NO"; orders.distressUrgency = 4; orders.shipDamage = 80
+    elseif preset == "DEFEND STATIONS" then orders.fleetRole = "GUARD HOME"; orders.coverage = "ONE GATE"; orders.respondShips = "NO"; orders.respondStations = "YES"; orders.distressUrgency = 3; orders.stationDamage = 90
+    elseif preset == "HUNT PIRATES" then orders.fleetRole = "PATROL"; orders.coverage = "THREE GATES"; orders.respondShips = "YES"; orders.respondStations = "YES"; orders.distressUrgency = 3; orders.shipDamage = 90; orders.stationDamage = 90
+    elseif preset == "STAY SAFE" then orders.fleetRole = "GUARD HOME"; orders.coverage = "HOME SECTOR ONLY"; orders.respondShips = "YES"; orders.respondStations = "YES"; orders.distressUrgency = 8; orders.shipDamage = 50; orders.stationDamage = 50
+    else orders.coverage = "OFF"; orders.respondShips = "NO"; orders.respondStations = "NO" end
 end
 
 local function fleetOrdersPane(tableWidget)
@@ -1874,7 +2166,60 @@ local function fleetOrdersPane(tableWidget)
             requestFleetDraftSave(selected, selectedFleetKey, orders, homeSector)
         end, not pendingDraft, headingColor)
         textRow(tableWidget, "Draft status", savedDraft and "DRAFT SAVED IN GAME STATE - NO ORDERS WERE SENT" or pendingDraft and "SAVE REQUEST SENT - WAITING FOR PERSISTENT READBACK" or "NOT SAVED - PRESS SAVE AS DRAFT", savedDraft and passColor or warningColor)
+        section(tableWidget, "TEMPLATES AND PRESETS")
+        dropdownRow(tableWidget, "Plain-language preset", automationPresets, menu.operations.preset, function(value)
+            menu.operations.preset = tostring(value)
+            menu.applyPreset(orders, menu.operations.preset)
+            markFleetOrdersChanged(selectedFleetKey, orders)
+            menu.plan.lastResult = menu.operations.preset .. " LOADED INTO THIS FLEET'S VISIBLE DRAFT - NO ORDER WAS SENT"
+            menu.plan.lastState = "VISIBLE_DRAFT_UPDATED"
+            menu.notice = menu.plan.lastResult
+            rebuild(false)
+        end)
+        textRow(tableWidget, "Preset safety", "A preset only fills the visible fleet draft. Review it, choose Home, then separately save or send.", passColor)
+        actionRow(tableWidget, "Save template", #menu.templates < 8 and "SAVE CURRENT VISIBLE DRAFT AS TEMPLATE " .. tostring(#menu.templates + 1) or "LIMIT REACHED - 8 TEMPLATES", function()
+            auditAction("TEMPLATE_SAVE", selectedFleetAudit, "TEMPLATE SAVE REQUESTED - PERSISTENT READBACK REQUIRED", "TEMPLATE_PENDING", { "TEMPLATE " .. tostring(#menu.templates + 1), orders.fleetRole, orders.coverage, orders.respondShips, orders.respondStations, orders.distressUrgency, orders.shipDamage, orders.stationDamage, orders.returnHome })
+        end, #menu.templates < 8 and not menu.pendingActionKind, headingColor)
+        if #menu.templates > 0 then
+            menu.templateChoice = clamp(menu.templateChoice, 1, #menu.templates)
+            local templateLabels = {}
+            for index, template in ipairs(menu.templates) do templateLabels[index] = tostring(template[2]) end
+            dropdownRow(tableWidget, "Saved template", templateLabels, templateLabels[menu.templateChoice], function(value)
+                for index, label in ipairs(templateLabels) do if label == value then menu.templateChoice = index; return end end
+            end)
+            actionRow(tableWidget, "Apply template", "APPLY TO THIS VISIBLE DRAFT - DO NOT SEND", function()
+                local template = menu.templates[menu.templateChoice]
+                orders.fleetRole = normalizeFleetRole(template[3]); orders.coverage = normalizeCoverage(template[4]); orders.respondShips = tostring(template[5]); orders.respondStations = tostring(template[6]); orders.distressUrgency = tonumber(template[7]) or 5; orders.shipDamage = tonumber(template[8]) or 70; orders.stationDamage = tonumber(template[9]) or 70; orders.returnHome = tostring(template[10] or "YES")
+                markFleetOrdersChanged(selectedFleetKey, orders)
+                menu.plan.lastResult = tostring(template[2]) .. " APPLIED TO THIS VISIBLE DRAFT - NO ORDER WAS SENT"
+                menu.plan.lastState = "VISIBLE_DRAFT_UPDATED"
+                menu.notice = menu.plan.lastResult
+                rebuild(false)
+            end, true, passColor)
+        end
         actionRow(tableWidget, "Automation lock", orders.locked and "LOCKED - FOC CANNOT CHANGE THIS FLEET" or "UNLOCKED - APPROVED PLANS MAY CHANGE THIS FLEET", function() orders.locked = not orders.locked; markFleetOrdersChanged(selectedFleetKey, orders); rebuild(false) end, true, warningColor)
+        section(tableWidget, "X4 SUBORDINATE GROUP POLICIES")
+        textRow(tableWidget, "What these do", "These controls change X4's real settings for every current direct subordinate group in this fleet. FOC reads the setting back immediately and reports BLOCKED unless every group matches.", headingColor)
+        local _, provenGroups = fleetSubordinateGroups(selected)
+        textRow(tableWidget, "Current groups", #provenGroups > 0 and (tostring(#provenGroups) .. " DIRECT GROUP(S): " .. table.concat(provenGroups, ", ")) or "NO CURRENT DIRECT SUBORDINATE GROUP WAS PROVEN", #provenGroups > 0 and passColor or warningColor)
+        for _, policy in ipairs({ "dock", "resupply", "distress", "reinforce" }) do
+            local policyState, enabledGroups, totalGroups = fleetGroupPolicyState(selected, policy)
+            local contract = groupPolicyContracts[policy]
+            textRow(tableWidget, contract.label, policyState .. " | " .. tostring(enabledGroups) .. " OF " .. tostring(totalGroups) .. " GROUP(S) ENABLED", (policyState == "UNKNOWN" or policyState == "UNAVAILABLE" or policyState == "MIXED") and warningColor or neutralColor)
+            buttonPairRow(tableWidget,
+                "YES - ENABLE FOR ALL CURRENT GROUPS", function()
+                    local success, result = setFleetGroupPolicy(selected, policy, true)
+                    auditAction("NATIVE_GROUP_POLICY", selectedFleetAudit, result, success and "GROUP_POLICY_CONFIRMED" or "BLOCKED", { policy, "YES", success and "CONFIRMED" or "BLOCKED" })
+                end,
+                "NO - DISABLE FOR ALL CURRENT GROUPS", function()
+                    local success, result = setFleetGroupPolicy(selected, policy, false)
+                    auditAction("NATIVE_GROUP_POLICY", selectedFleetAudit, result, success and "GROUP_POLICY_CONFIRMED" or "BLOCKED", { policy, "NO", success and "CONFIRMED" or "BLOCKED" })
+                end,
+                warningColor, #provenGroups > 0 and not menu.pendingActionKind, #provenGroups > 0 and not menu.pendingActionKind)
+            if policy == "reinforce" then
+                textRow(tableWidget, "Reinforcement warning", "YES enables X4's native fleet-reinforcement policy. X4 may use its normal ship-building and resource rules. FOC does not buy a blueprint, create a free ship, or hide a cost.", warningColor)
+            end
+        end
         local recallLabel = selected.missionProtected and "BLOCKED - MISSION / QUEST FLEET" or (reactionEligible and "RECALL TO HOME POST" or "BLOCKED - NON-COMBAT OVERRIDE REQUIRED")
         actionRow(tableWidget, "Emergency", recallLabel, function()
             auditAction("RECALL_FLEET", selected.commander.idcode, "RECALL REQUEST SENT - WAITING FOR RETURN-TO-POST READBACK", "RECALL_PENDING")
@@ -2268,6 +2613,18 @@ local function settingsPage(tableWidget)
     textRow(tableWidget, "Planner duties", "Inventory ships/personnel; fill proven vacancies; preserve locks; identify grouped ships; choose commanders/roles/names/homes; spread coverage; route patrols; retain reserve; warn on gaps, overlap, and overextension.", neutralColor)
     textRow(tableWidget, "Replacement boundary", "Destroyed-member replacement may create a recommendation only. No purchase, construction, credit spend, or staffing guess is authorized.", passColor)
     textRow(tableWidget, "Rebalance threshold", "25% minimum modeled benefit; 30 second cooldown; duplicate suppression; bounded backoff; maximum one native mutation per cycle.", neutralColor)
+    section(tableWidget, "READINESS AND EMERGENCY POLICY")
+    dropdownRow(tableWidget, "Emergency retreat", { "OFF", "ON" }, menu.operations.retreat, function(value) menu.operations.retreat = tostring(value) end)
+    dropdownRow(tableWidget, "Retreat below", damageOptions, menu.operations.retreatHull, function(value) menu.operations.retreatHull = tonumber(value) or 30 end, "% commander hull")
+    dropdownRow(tableWidget, "Return afterward", yesNoOptions, menu.operations.retreatReturn, function(value) menu.operations.retreatReturn = tostring(value) end)
+    textRow(tableWidget, "Retreat safety", "When ON, FOC may issue X4's native Flee order only to an enrolled active fleet after exact attacker, hull, ownership, pilot, story, player-control, current-order and duplicate-lock checks. Cargo is never dropped.", warningColor)
+    dropdownRow(tableWidget, "Commander hull minimum", repairThresholdOptions, menu.operations.commanderHull, function(value) menu.operations.commanderHull = tonumber(value) or 50 end, "%")
+    dropdownRow(tableWidget, "Fleet hull minimum", repairThresholdOptions, menu.operations.fleetHull, function(value) menu.operations.fleetHull = tonumber(value) or 50 end, "%")
+    dropdownRow(tableWidget, "Captain coverage minimum", repairThresholdOptions, menu.operations.captainCoverage, function(value) menu.operations.captainCoverage = tonumber(value) or 100 end, "%")
+    dropdownRow(tableWidget, "Maximum fleet size", responseFleetCapOptions, menu.operations.maxFleetSize, function(value) menu.operations.maxFleetSize = tonumber(value) or 100 end, " ships")
+    actionRow(tableWidget, "Save policy", "SAVE READINESS AND EMERGENCY POLICY", function()
+        auditAction("OPERATIONS_POLICY_SAVE", "GLOBAL", "OPERATIONS POLICY SAVE REQUESTED - PERSISTENT READBACK REQUIRED", "OPERATIONS_POLICY_PENDING", { menu.operations.retreat, menu.operations.retreatHull, menu.operations.retreatReturn, menu.operations.commanderHull, menu.operations.fleetHull, menu.operations.captainCoverage, menu.operations.maxFleetSize, menu.operations.preset })
+    end, not menu.pendingActionKind, passColor)
     section(tableWidget, "HARD PERFORMANCE AND SAFETY LIMITS")
     textRow(tableWidget, "Fleet source", "Authoritative MD structural discovery - all eligible commanders and all subordinates", passColor)
     textRow(tableWidget, "Fleet registry", "All authoritative eligible rows; paged 16 at a time", neutralColor)
@@ -2300,6 +2657,13 @@ local function activityPage(tableWidget)
             row[2]:createText(entry.kind .. " | " .. entry.state, { color = stateColor })
             row[3]:createText(entry.subject, { wordwrap = true, color = red and criticalColor or yellow and warningColor or nil })
             row[4]:createText(entry.detail, { wordwrap = true, color = detailColor })
+        end
+        section(tableWidget, "AFTER-ACTION REPORTS")
+        textRow(tableWidget, "Boundary", "Latest resolved incidents are saved with honest UNKNOWN fields and a 50-report limit.", passColor)
+        if #menu.afterActionReports == 0 then textRow(tableWidget, "Reports", "NO RESOLVED INCIDENT REPORT HAS BEEN RECORDED", neutralColor) end
+        for index = #menu.afterActionReports, math.max(1, #menu.afterActionReports - 4), -1 do
+            local report = menu.afterActionReports[index]
+            if report then textRow(tableWidget, "REPORT " .. tostring(report[1]), "Victim: " .. safeText(report[5], "UNKNOWN") .. " | Attacker: " .. safeText(report[6], "UNKNOWN") .. " | Fleet: " .. safeText(report[7], "UNKNOWN") .. "\nOutcome: " .. safeText(report[8], "UNKNOWN") .. " | Losses: " .. safeText(report[9], "UNKNOWN") .. " | Damage: " .. safeText(report[10], "UNKNOWN"), neutralColor) end
         end
     else
         section(tableWidget, "BOUNDED SESSION HISTORY")
@@ -2365,6 +2729,7 @@ function menu.create()
     menu.mainTable = tableWidget
     pageGuide(tableWidget)
     if menu.page == "command" then commandPage(tableWidget)
+    elseif menu.page == "taskforces" then menu.taskForcesPage(tableWidget)
     elseif menu.page == "readiness" then readinessPage(tableWidget)
     elseif menu.page == "academy" then academyPage(tableWidget)
     elseif menu.page == "store" then academyStorePage(tableWidget)
@@ -2418,11 +2783,30 @@ function menu.onShowMenu()
     if type(menu.param[18]) == "table" then loadStructuralFleetRows(menu.param[18]) end
     if type(menu.param[19]) == "table" then loadStoryOverrideIDs(menu.param[19]) end
     if type(menu.param[20]) == "table" then loadStoryAnsweredIDs(menu.param[20]) end
+    if type(menu.param[21]) == "table" then menu.taskForces = menu.param[21] end
+    for _, force in ipairs(menu.taskForces) do
+        if tostring(force[7] or "") == "" then force[7] = nil end
+        if tostring(force[8] or "") == "" then force[8] = nil end
+        if type(force[9]) ~= "table" then force[9] = {} else for index, member in ipairs(force[9]) do force[9][index] = tostring(member) end end
+    end
+    if type(menu.param[22]) == "table" then menu.templates = menu.param[22] end
+    if type(menu.param[23]) == "table" then menu.afterActionReports = menu.param[23] end
+    if type(menu.param[24]) == "table" then
+        local policy = menu.param[24]
+        menu.operations.retreat = tostring(policy[2] or "OFF")
+        menu.operations.retreatHull = tonumber(policy[3]) or 30
+        menu.operations.retreatReturn = tostring(policy[4] or "YES")
+        menu.operations.commanderHull = tonumber(policy[5]) or 50
+        menu.operations.fleetHull = tonumber(policy[6]) or 50
+        menu.operations.captainCoverage = tonumber(policy[7]) or 100
+        menu.operations.maxFleetSize = tonumber(policy[8]) or 100
+        menu.operations.preset = tostring(policy[9] or "MANUAL ORDERS ONLY")
+    end
     if authoritativeDraftRows and restoredDrafts > 0 then
         menu.notice = "RESTORED " .. tostring(restoredDrafts) .. " SAVED FLEET DRAFT(S) FROM THE GAME SAVE"
-        DebugError("[FOC][B035][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
+        DebugError("[FOC][B040][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
     elseif authoritativeDraftRows then
-        DebugError("[FOC][B035][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
+        DebugError("[FOC][B040][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
     end
     if menu.pendingHomeSelection then
         menu.pendingHomeSelection = nil
@@ -2462,7 +2846,7 @@ local function init()
     if Helper and Helper.registerMenu then
         Helper.registerMenu(menu)
     else
-        DebugError("[FOC][B035][LUA_ERROR] Helper.registerMenu unavailable")
+        DebugError("[FOC][B040][LUA_ERROR] Helper.registerMenu unavailable")
     end
     RegisterEvent(menu.name .. ".draft.key", draftKeyReceived)
     RegisterEvent(menu.name .. ".draft.result", draftResultReceived)
@@ -2480,6 +2864,21 @@ local function init()
     RegisterEvent(menu.name .. ".activity.severity", liveActivitySeverity)
     RegisterEvent(menu.name .. ".activity.row.commit", liveActivityCommit)
     RegisterEvent(menu.name .. ".structural.snapshot.begin", menu.structuralSnapshotBegin)
+    RegisterEvent(menu.name .. ".roadmap.begin", menu.roadmapBegin)
+    RegisterEvent(menu.name .. ".roadmap.force.begin", menu.roadmapForceBegin)
+    RegisterEvent(menu.name .. ".roadmap.force.id", menu.roadmapForceID)
+    RegisterEvent(menu.name .. ".roadmap.force.name", menu.roadmapForceName)
+    RegisterEvent(menu.name .. ".roadmap.force.priority", menu.roadmapForcePriority)
+    RegisterEvent(menu.name .. ".roadmap.force.zone", menu.roadmapForceZone)
+    RegisterEvent(menu.name .. ".roadmap.force.coverage", menu.roadmapForceCoverage)
+    RegisterEvent(menu.name .. ".roadmap.force.rotation", menu.roadmapForceRotation)
+    RegisterEvent(menu.name .. ".roadmap.force.active", menu.roadmapForceActive)
+    RegisterEvent(menu.name .. ".roadmap.force.reserve", menu.roadmapForceReserve)
+    RegisterEvent(menu.name .. ".roadmap.force.member", menu.roadmapForceMember)
+    RegisterEvent(menu.name .. ".roadmap.force.commit", menu.roadmapForceCommit)
+    RegisterEvent(menu.name .. ".roadmap.template.row", menu.roadmapTemplateRow)
+    RegisterEvent(menu.name .. ".roadmap.policy", menu.roadmapPolicy)
+    RegisterEvent(menu.name .. ".roadmap.complete", menu.roadmapComplete)
     RegisterEvent(menu.name .. ".structural.snapshot.row.begin", menu.structuralSnapshotRowBegin)
     RegisterEvent(menu.name .. ".structural.snapshot.commander", menu.structuralSnapshotCommander)
     RegisterEvent(menu.name .. ".structural.snapshot.key", menu.structuralSnapshotKey)

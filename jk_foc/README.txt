@@ -1,18 +1,71 @@
-Fleet Operations Command - Build 035 / version 134
+Fleet Operations Command - Build 040 / version 139
 
 Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
 
-Build 035 preserves Build 033's governed fleet, readiness, Academy, Store,
-Marine-transfer, mission/story safety, distress flood gate, Activity, repair,
-and native readback systems. It repairs Build 032's exact Save 20 UI discovery
-failure by passing the authoritative MD structural fleet registry directly to
-Lua instead of rebuilding it from the first 500 faction ships. Recovery schema
-4 discovers player-owned top-level combat commanders
-structurally, requires at least one living combat subordinate, and snapshots the
-commander plus every living non-unit ship in allsubordinates. Fleet names and
-persisted Reaction Force markers never establish eligibility or membership.
+Build 040 corrects the shared click acknowledgement so it never overwrites a
+successful preview state before a guarded approval runs. This restores Marine
+and Captain preview-to-transfer workflows while preserving immediate feedback.
+The visible menu identity is also corrected to Build 040 / version 139.
 
-Build 035 also corrects completed-story false protection. FOC automatically
+Build 039 added a fixed, always-visible LAST ACTION line so operational buttons
+immediately acknowledge a click and MD/native actions replace that message with
+their proven success or failure readback. Template and preset actions explicitly
+confirm that they changed only the visible draft and sent no order. The pointer
+toggle now uses a unique purple background, and the fleet list adds an
+alphabetical A-F/G-L/M-R/S-Z finder with deterministic name sorting.
+
+Build 038 added contextual `->` next-step hints to enabled actions in every
+multi-step workflow. More than one arrow means more than one valid choice.
+CLEAR NEXT-STEP POINTERS hides the hints and SHOW NEXT-STEP POINTERS restores
+them. Hints never enable a blocked action or change gameplay state. Build 038
+also preserves the last complete Task Force display when an X4 native-screen
+return does not repeat the authoritative Task Force payload.
+
+Build 039 preserves accepted Build 036 and adds the complete experimental roadmap
+as operational, bounded systems. There are no demonstration-only buttons.
+
+The new TASK FORCES tab stores up to eight named groups without changing X4's
+native fleet hierarchy. A fleet may belong to only one Task Force. Players can
+save response priority, Home-sector zone, range, manual or full-automation
+rotation, and distinct active/reserve fleets. Manual rotation revalidates both
+fleets and Homes, returns the old active fleet to its post, activates the reserve
+fleet's saved native order, verifies both orders, then swaps the saved roles.
+Full automation uses the same 30-second one-mutation boundary and rotates only
+when no distress dispatch occurred and the active fleet fails saved readiness.
+
+Fleet Advanced Controls now expose X4's real subordinate-group switches for
+docking with the commander, resupplying at fleet, responding to X4 distress
+calls, and native fleet reinforcement. Every change is made for current direct
+groups and read back immediately; a mismatch is BLOCKED. Reinforcement can use
+X4's normal construction and resource rules. FOC never creates a free ship or
+hides a cost.
+
+Up to eight reusable fleet templates and six plain-language presets populate
+visible draft settings only. They never send an order. Readiness policy stores
+commander hull, fleet hull, captain coverage, and maximum fleet size gates.
+Task Force Home sectors can be HIGH, NORMAL, or EXCLUDED response zones.
+Threat response classifies the observed attacker as XS, S, M, L, XL, or UNKNOWN,
+requires a matching minimum response tier (1, 1, 3, 6, or 10 ships), then selects
+the smallest eligible ready fleet before distance and priority while retaining
+the accepted exclusive incident locks.
+
+Optional Emergency Retreat issues X4's native Flee order only for an enrolled
+active fleet threatened by the exact observed attacker and below the saved hull
+threshold. Story/mission ships, player control, critical orders, missing pilots,
+and duplicate retreats remain blocked. Cargo dropping is disabled and return
+behavior is explicit. Resolved response incidents create up to 50 persistent
+after-action reports with victim, attacker, fleet, times, outcome, known losses,
+and known damage; unavailable evidence is reported as UNKNOWN.
+
+Build 035 repaired Build 032's exact Save 20 UI discovery failure by passing the
+authoritative MD structural fleet registry directly to Lua instead of rebuilding
+it from the first 500 faction ships. Recovery schema 4 discovers player-owned
+top-level combat commanders structurally, requires at least one living combat
+subordinate, and snapshots the commander plus every living non-unit ship in
+allsubordinates. Fleet names and persisted Reaction Force markers never establish
+eligibility or membership.
+
+Build 035 also corrected completed-story false protection. FOC automatically
 releases the player-owned Yaki cover ship when X4 reports Story_Yaki.Start
 complete. When X4 still marks a ship as story- or mission-protected, the Fleets
 page asks: "Is this ship still being used by a story or mission?" YES keeps it
@@ -32,7 +85,9 @@ are retained only as complete recovery-only orphan ledgers when their commander
 is gone. Stale non-eligible ledgers are retired atomically, and every active
 ledger reports expected versus distinct living records.
 
-Build 035 is a TEST artifact. X4-dependent schema-4 migration, structural
+Build 039 is a TEST artifact. X4-dependent roadmap migration, native group-policy
+readback, Task Force rotation, readiness and zone selection, native Flee behavior,
+after-action persistence, schema-4 migration, structural
 discovery, destruction
 matching, construction completion/cancellation, hierarchy restoration, captain
 recruitment/training/assignment, and save/reload behavior remain RUNTIME
@@ -172,6 +227,6 @@ Preserved safety boundaries
   build workflow.
 
 Static validation and regression review cannot establish behavior inside X4.
-Every affected Build 035 behavior remains RUNTIME ACCEPTANCE REQUIRED until
+Every affected Build 039 behavior remains RUNTIME ACCEPTANCE REQUIRED until
 RazorEQX tests the exact staged TEST artifact. That acceptance does not authorize
 GA promotion, Steam publication, GitHub publication, push, or live installation.

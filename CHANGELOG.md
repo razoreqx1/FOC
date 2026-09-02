@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.39 — Build 040 — 2026-09-02
+
+### Fleet planning and task forces
+
+- Added up to eight save-backed named task forces with active/reserve fleet rotation while leaving X4's native fleet hierarchy unchanged.
+- Added reusable fleet drafts, templates, and plain-language presets with preview-before-send safeguards.
+- Added an alphabetical fleet finder for large empires and persistent draft recovery across save/load.
+- Added direct-subordinate group policies for docking, resupply, distress response, and native fleet reinforcement.
+
+### Workflow clarity and feedback
+
+- Added optional next-step arrows to real workflow actions and a prominent pinned control to clear or restore them.
+- Added a pinned, color-coded Last Action readback so button results remain visible while scrolling.
+- Improved exact feedback for drafts, templates, subordinate-policy changes, task-force operations, and Academy assignments.
+
+### Academy and recovery
+
+- Added exact Marine assignment preview and verified transfer readback, including crew and Marine count changes.
+- Hardened preview identity so a changed trainee/destination pair must pass a fresh preview before transfer.
+- Expanded repair, replacement, and rebuild guidance while preserving native X4 pricing, resources, and completion authority.
+
+### Release identity
+
+- Corrected the visible and packaged release identity to Build 040 / extension version 139.
+- Updated the complete player guide with the current workflows and runtime screenshots.
+
 ## v1.34 — Build 035 — 2026-09-02
 
 ### Fleet discovery and persistence

@@ -3,7 +3,7 @@
          name="Fleet Operations Command"
          description="Standalone fleet readiness, response, training, and native fleet maintenance for player fleets."
          author="RazorEQX"
-         version="134"
+         version="139"
          date="2026-09-02"
          save="false">
   <text language="44"

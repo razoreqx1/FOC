@@ -7,16 +7,17 @@
 Fleet Operations Command (FOC) is a player-first fleet readiness, patrol, recovery, training, and distress-response console for **X4: Foundations**. It turns large-empire fleet management into clear, bounded decisions while keeping the player in command.
 
 [![Steam Workshop](https://img.shields.io/badge/Steam-Workshop-1b2838?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
-![Release](https://img.shields.io/badge/release-v1.34-blue)
+![Release](https://img.shields.io/badge/release-v1.39-blue)
 ![Game](https://img.shields.io/badge/game-X4%3A%20Foundations-orange)
 
 ## Current release
 
-- Public version: **1.34**
-- Governed runtime identity: **Build 035 / extension version 134**
-- Release archive: [`dist/FOC_v134_GA.zip`](dist/FOC_v134_GA.zip)
-- Release SHA-256: `4E3B0CB4E23DF0473BBF5AE54BC74464500C5F3F7BDD848C38A99F5CF837CAC8`
-- Complete player guide: [`docs/FOC_v1.34_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.34_COMPLETE_PLAYER_GUIDE.pdf)
+- Public version: **1.39**
+- Governed runtime identity: **Build 040 / extension version 139**
+- Release archive: [`dist/FOC_v139_GA.zip`](dist/FOC_v139_GA.zip)
+- Release SHA-256: `D3E272AB4CA306EC13485CAC57131F41DC17C496AF4071DF0918A066141028F3`
+- Complete player guide: [`docs/FOC_v1.39_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.39_COMPLETE_PLAYER_GUIDE.pdf)
+- Browser-readable player guide: [`docs/PLAYER_GUIDE.md`](docs/PLAYER_GUIDE.md)
 - Steam Workshop: [Fleet Operations Command](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
 
 This repository contains the same six runtime files as the tested and accepted GA release. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
@@ -24,7 +25,10 @@ This repository contains the same six runtime files as the tested and accepted G
 ## Features
 
 - **One-button patrol deployment** — configure a complete plan and send only the selected fleet.
+- **Named task forces** — group save-backed fleet identities into active/reserve defense teams without changing X4's native fleet hierarchy.
+- **Plans, templates, and presets** — save fleet drafts, reuse plans, and preview every consequential action before sending orders.
 - **Structural fleet discovery** — finds eligible combat fleets from X4's live commander hierarchy instead of names, old markers, or a partial faction-ship sample.
+- **Alphabetical fleet finder** — narrows large fleet lists without changing the underlying structural discovery rules.
 - **Focused patrol controls** — choose Home, distress-response range, distress classes, urgency, hull thresholds, and return behavior.
 - **Native X4 orders** — uses Patrol, Protect Position, and Attack orders with native readback before reporting success.
 - **Native fleet maintenance** — opens X4's repair screen and preserves exact blueprint/loadout evidence for guarded replacement and player-yard rebuild requests.
@@ -34,6 +38,7 @@ This repository contains the same six runtime files as the tested and accepted G
 - **Clear story-ship control** — protects unknown ships and asks a saved, exact-ship Yes-or-No question when X4 still marks a ship after its story is finished.
 - **Preview before action** — evaluates response, staffing, purchase, and rebuild eligibility before mutation.
 - **Evidence-preserving activity** — reports what was requested, accepted, blocked, and returned by X4.
+- **Pinned action feedback and workflow pointers** — keeps the last result visible while optional arrows identify the next real step.
 - **Large-empire bounds** — capped sampling, bounded results, duplicate suppression, and a single 30-second automation scheduler.
 
 ## Player authority
@@ -51,7 +56,7 @@ Subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedet
 ### Manual installation
 
 1. Close X4: Foundations.
-2. Download [`FOC_v134_GA.zip`](dist/FOC_v134_GA.zip).
+2. Download [`FOC_v139_GA.zip`](dist/FOC_v139_GA.zip).
 3. Extract the lowercase `jk_foc` folder into the game's `extensions` directory.
 4. Confirm the final path ends with `X4 Foundations/extensions/jk_foc/content.xml`.
 5. Start X4 and enable Fleet Operations Command if needed.

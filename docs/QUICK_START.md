@@ -19,12 +19,15 @@ FOC contains eight focused pages:
 
 1. Open **Fleets**.
 2. Select a player-owned combat fleet.
+   Use the alphabetical **Fleet finder** when the list is long.
 3. Confirm its commander and captain evidence.
 4. Choose its Home sector and exact Home point.
 5. Configure distress-response range.
 6. Configure ship/station response, distress scope, urgency, hull thresholds, and return behavior.
 7. Review the summary at the bottom of the page.
 8. Select **Send This Fleet on Patrol — Replaces Current Orders**.
+
+FOC can mark real next steps with `->`. Use the pinned **Clear Next-Step Pointers** button to hide them and **Show Next-Step Pointers** to restore them. The pinned **Last Action** line remains visible while you scroll and reports whether the last button succeeded or was blocked.
 
 FOC saves and unlocks only that fleet, replaces only eligible current orders, starts a native Patrol or Protect Position default, and arms the configured distress response. It reports active only after X4 returns the intended native order identity.
 
