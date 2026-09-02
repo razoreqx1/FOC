@@ -1,4 +1,5 @@
 *.png binary
+*.pdf binary
 *.zip binary
 *.lua text eol=lf
 *.xml text eol=lf

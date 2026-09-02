@@ -16,6 +16,7 @@ Fleet Operations Command (FOC) is a player-first fleet readiness, patrol, recove
 - Governed runtime identity: **Build 035 / extension version 134**
 - Release archive: [`dist/FOC_v134_GA.zip`](dist/FOC_v134_GA.zip)
 - Release SHA-256: `4E3B0CB4E23DF0473BBF5AE54BC74464500C5F3F7BDD848C38A99F5CF837CAC8`
+- Complete player guide: [`docs/FOC_v1.34_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.34_COMPLETE_PLAYER_GUIDE.pdf)
 - Steam Workshop: [Fleet Operations Command](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
 
 This repository contains the same six runtime files as the tested and accepted GA release. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
