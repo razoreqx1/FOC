@@ -1,119 +1,177 @@
-Fleet Operations Command - Build 020 / version 119
+Fleet Operations Command - Build 035 / version 134
 
 Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
 
-Build 020 preserves the predecessor's governed recruitment, training, safety, and native
-readback systems while replacing the multi-page patrol setup with one primary
-Fleets-page action. Configure Home, patrol range, response classes, urgency, hull
-thresholds, and return behavior, then press SEND THIS FLEET ON PATROL. That one
-action saves and unlocks only the selected fleet, replaces only its eligible
-orders, starts its native Patrol or Protect Position default, and arms bounded
-distress response. FOC reports PATROL ACTIVE only after X4 confirms the intended
-default order is also the fleet's current order.
+Build 035 preserves Build 033's governed fleet, readiness, Academy, Store,
+Marine-transfer, mission/story safety, distress flood gate, Activity, repair,
+and native readback systems. It repairs Build 032's exact Save 20 UI discovery
+failure by passing the authoritative MD structural fleet registry directly to
+Lua instead of rebuilding it from the first 500 faction ships. Recovery schema
+4 discovers player-owned top-level combat commanders
+structurally, requires at least one living combat subordinate, and snapshots the
+commander plus every living non-unit ship in allsubordinates. Fleet names and
+persisted Reaction Force markers never establish eligibility or membership.
 
-Implemented systems
+Build 035 also corrects completed-story false protection. FOC automatically
+releases the player-owned Yaki cover ship when X4 reports Story_Yaki.Start
+complete. When X4 still marks a ship as story- or mission-protected, the Fleets
+page asks: "Is this ship still being used by a story or mission?" YES keeps it
+protected; NO lets FOC control only that exact ship. The answer is saved by
+stable ship ID. This FOC setting never changes X4's story state, and protection
+remains the safe default. Build 035 separately remembers that the player has
+answered, then removes the complete question, explanation, and button block.
+Existing Build 034 NO answers and automatic completed-story releases migrate
+as already answered. The buttons use plain ASCII text so X4 renders every
+character correctly.
+Station guards, station-commanded ships, non-combat/cargo/mining commanders,
+and their subordinate escorts are excluded. Living records are deduplicated
+only by stable non-null ship ID and retain immediate commander, group, and
+assignment reconstruction data. Native fleetunits remain limited to X4's
+missing/reconstitution-slot route. Valid LOST, NATIVE_LOST, and QUEUED records
+are retained only as complete recovery-only orphan ledgers when their commander
+is gone. Stale non-eligible ledgers are retired atomically, and every active
+ledger reports expected versus distinct living records.
 
-- Eight-tab Fleet Operations Command interface with bounded fleet/readiness
-  sampling and a restrained EOC-derived color palette.
-- The normal reaction-force list shows native `purpose.fight` commanders only.
-  A separate scope control reveals non-combat fleets with a supply/logistics
-  warning and a persistent per-fleet `OVERRIDE - DO THIS ANYWAY` decision.
-  Trade ships remain covered by readiness and eligible captain staffing.
-- Mission/quest commanders and every mission/quest subordinate are absolutely
-  protected at the UI and native mutation boundary; no override bypasses them.
-  The official Terran story's persistent Geometric Owl object is explicitly
-  protected even after its active mission phase.
-- Persistent per-fleet Drafts stored as MD native-object records.
-- Exact map-selected Home sector and position, patrol/defence role, coverage,
-  distress, damage, return, manual-order, and lock settings.
-- The primary Fleets-page send action creates a native Patrol or ProtectPosition
-  default for only the selected fleet without requiring Draft, lock, Settings, or
-  Command steps. The older advanced controls remain optional.
-- Apply Approved Plan remains available as an advanced global control and creates native Patrol or ProtectPosition default orders
-  and reports applied, truly blocked, and deliberately locked-skipped fleets from
-  default-order readback. A genuine mixed result is shown as PLAN_PARTIAL and
-  never claims that nothing changed.
-- The visible header derives Build 020 from the MD-supplied menu identity instead
-  of a Lua literal. Activity pages render at most eight wrapped records with a
-  conservative height budget proven against the Build 016 Widget-system failure.
-- Save As Draft becomes inactive while that fleet key awaits persistent readback,
-  and the dispatch function independently rejects a repeated pending request.
-- Recall creates a native ProtectPosition return-to-post order and confirms its
-  default-order identity.
-- Captain evidence uses X4's native Lua `assignedpilot` to
-  `tostring` to `ConvertStringToLuaID` route. Proven vacancies and unknown
-  records have separate bounded lists and totals, so unknown evidence cannot
-  hide a vacancy. The Academy destination collection is MD-authoritative and
-  applies ownership, AI-pilot control-post, vacancy, player-control, mission,
-  protected-id, and Geometric Owl guards before a ship is displayed.
-- Training Academy holds at most 25 persistent trainee templates distributed
-  across operational player-owned, non-mission stations. It creates no field-
-  ship donor pool and never selects marines, service crew aboard ships,
-  managers, existing captains, or mission/story personnel.
-- Existing Academy records are migrated to schema 2 whenever state is opened or
-  used. Missing or duplicate legacy ids are deterministically rebuilt without
-  creating or deleting personnel, and the roster is serialized before the UI
-  reports success.
-- Academy training uses X4's exact seminar ladder, verifies the applicable
-  piloting seminar in player inventory, consumes exactly one, applies the
-  native skill increase, and requires inventory plus skill readback.
-- `PROMOTE AND ASSIGN NEXT 25 CAPTAINS` is a player-triggered approval, not a
-  scheduler. It builds a fresh valid local pool, sorts highest current piloting
-  skill first, pairs at most 25 entries with current proven vacancies, and blocks
-  the complete batch before mutation unless every required seminar tier is in
-  inventory. Each training step and each ship assignment requires native readback.
-- The bulk route never recruits automatically, never uses shipboard service crew
-  or marines, never replaces an existing captain, never changes ship orders, and
-  never processes more than 25 trainee/ship pairs per invocation.
-- Academy assignment instantiates the selected persistent trainee at the
-  selected FOC-proven vacancy, transfers that actor to `controlpost.aipilot`,
-  requires exact `assignedpilot` readback, and retires only that Academy record.
-- Academy and mission-protection refreshes replace the Lua cache only after a
-  complete bounded scalar snapshot. Incomplete snapshots preserve the prior
-  authoritative cache and visibly block refresh instead of clearing safety.
-- Captain assignment uses two independent selectors: destination ship first,
-  trainee crew second. The crew row shows current piloting rating and offers a
-  one-session Train button. Preview names the exact pair before
-  `TRANSFER SELECTED CREW TO SELECTED SHIP` can run.
-- The destination selector retains the MD-supplied native ship component. Lua
-  uses X4's documented component-to-64-bit conversion on arrival and 64-bit-to-
-  LuaID conversion on return; MD revalidates that exact component and records
-  each assignment guard in the debug log before any native mutation.
-- Academy vacancy discovery sorts the complete local MD player-ship result with
-  exact eligible components first, then examines at most 500 ranked ships. Its
-  bounded guard-funnel log records total, examined, each cumulative predicate,
-  and final rows so a legitimate zero-vacancy result is directly explainable.
-  Build 016 splits guard diagnostics into records with at most nine substitutions,
-  correcting Build 015's `%10`/`%11` rendering defect.
-- Every Academy callback re-resolves current stable selections. Missing, stale,
-  inactive, or changed selections block locally without sending a mutation.
-- Distress intake records attacks on player ships, including victim, attacker,
-  sector, age, and claimed state.
-- Manual dispatch requires a fresh unclaimed incident and an eligible selected
-  fleet, then creates a native immediate Attack order with the required
-  `primarytarget` parameter.
-- Full Automation uses the same incident evidence and fleet safeguards on a
-  30-second MD scheduler, with at most one dispatch per scheduler cycle.
-- Preview Plan, Apply Approved Plan, Full Automation, and emergency Stop are
-  explicit persistent authority modes. Preview actions do not mutate.
-- All native requests return visible state/result callbacks and are recorded in
-  bounded Activity history and the X4 debug log.
+Build 035 is a TEST artifact. X4-dependent schema-4 migration, structural
+discovery, destruction
+matching, construction completion/cancellation, hierarchy restoration, captain
+recruitment/training/assignment, and save/reload behavior remain RUNTIME
+ACCEPTANCE REQUIRED until RazorEQX tests this exact package.
 
-Safety boundaries
+Build 035 retains the separate Safety Thresholds button under Fleets. The page stores
+independent manual-repair eligibility thresholds for enrolled reaction-force
+ships and an all-player-owned default. The reaction value overrides that default
+for enrolled ships. These settings only decide which
+damaged ships FOC offers to the existing native repair handoff. X4 continues to
+show the exact price/resources and requires player confirmation.
 
-- Player ownership, stable identity, captain presence, Home resolution, fleet
-  lock, mode authority, fresh incident age, and native readback are checked at
-  the mutation boundary.
-- Locked fleets cannot be applied, recalled, or automatically dispatched.
-- Fleet sampling and ranked Academy vacancy output are capped at 500 ships, with
-  100 displayed fleets and 100 direct members per fleet. Saved-plan application
-  is capped at 100 Draft records. Bulk Academy mutation is separately capped at
-  25 exact trainee/ship pairs per explicit player approval.
-- No purchase, construction, or credit/cargo movement is implemented.
+Distress response uses a persistent incident/fleet flood gate. Build 028 added a
+new-save-load migration cue using X4's documented Setup.Start signal, creates
+the lock list with the native list action, and guards every dispatch read. FOC
+coalesces attacks from the same still-valid attacker into one bounded threat.
+Detection/debug output for a locked threat is limited to one update per ten
+seconds, with an immediate additional update when damage first turns red.
+Player-owned attackers and friendly-fire/self events are rejected. FOC sorts
+eligible reaction fleets by their current gated distance, sends exactly one
+closest fleet one uniquely named native Attack order, and never retries that
+threat merely because immediate readback failed or another fleet member is hit.
+The responding fleet stays locked until the victim rises above its captured
+distress threshold after a quiet period, or a full-hull/full-shield 100-percent
+threshold victim is quiet, or the victim, attacker, or commander ceases to exist. FOC
+cancels only its exact retained response order when that order is still current.
+The configurable ship cap filters whole fleets; FOC never detaches ships or
+issues subordinate orders.
+
+What changed
+
+- The top-level Doctrine tab and its non-operational page are removed.
+- Fleet orders expose only implemented native orders: Patrol and Guard Home.
+- Custom sector lists, custom routes, patrol-pattern controls, and misleading
+  route-preview controls are removed. Saved legacy values are normalized safely.
+- The former gate-count label is now Response range. It limits distress-response
+  eligibility; it does not claim to define a patrol route or patrol area.
+- Distress ownership remains player-only. The page no longer offers an
+  unsupported "help anyone" scope.
+- Live Activity stores an explicit severity on new rows. Ordinary distress calls
+  are yellow. A ship attack is red only when the observed ship hull is below
+  100 percent. Native rebuild requests for positively lost ship records are red.
+  Older saved rows remain readable and are conservatively classified from their
+  existing kind/detail data.
+- Build 025 initialized the persistent pending Marine-transfer value to null,
+  while its monitor admitted any existing value and dereferenced it as a table.
+  Build 026 removes legacy null/incomplete state on load and starts the monitor
+  only for a complete, non-null pending-transfer record. Valid pending transfers
+  continue from their saved identity.
+
+Repair / Replace / Rebuild
+
+The new Fleets subpage is deliberately split into native, auditable operations:
+
+1. Repair current ships
+   FOC lists currently observed hull-damaged members, revalidates ownership,
+   fleet membership, player control, mission/story protection, and critical
+   non-cancelable orders, finds a known compatible non-enemy ship-trader
+   facility, then opens X4's native Repair / Upgrade screen. X4 calculates and
+   displays the price/resources and requires the player's confirmation. FOC does
+   not create a free repair, accept a price, or report repair completion.
+
+2. Lost-ship blueprint and loadout review
+   FOC reads both a living selected commander's native fleet-unit records and
+   the persistent exact recovery ledgers for every enrolled fleet. Recovery
+   ledgers are refreshed when a draft is saved, a patrol is activated, and the
+   menu opens while the fleet is still live. Each record retains exact macro,
+   loadout, original fleet relationship, and mission/story protection state.
+   Records are checked against ship-blueprint ownership, compatible player-yard
+   hull capability, and saved-loadout equipment capability. FOC never guesses a
+   replacement design or buys a blueprint.
+
+3. Replace / rebuild lost ships
+   Preview is required. Confirmation re-resolves the commander and every guard,
+   then sends only exact lost records that have no current object or duplicate
+   build, have the ship blueprint, and have a player-owned yard able to build the
+   exact hull and saved loadout. A living commander retains X4's stock
+   `reconstitute_fleet` route. A destroyed commander uses the documented generic
+   player-yard construction action with the saved exact macro/loadout and the
+   returned build-task identity. On native completion readback, FOC restores the
+   original ship name and reattaches rebuilt/surviving members to the living or
+   rebuilt commander with their saved subordinate group. X4 consumes normal yard
+   resources. FOC sends no NPC-yard purchase and buys no blueprint.
+
+   This workflow is explicit and manual. FOC does not interpret a destruction
+   event as spending authority. A loss is rebuilt only after the player opens
+   Repair / Replace / Rebuild, refreshes readback, previews, and confirms the
+   rebuild request.
+
+Captain auto-fill
+
+The Academy captain auto-fill is a separate preview/approval transaction. The
+preview revalidates up to 25 proven vacancies, retained Pilot trainees, Academy
+capacity, eligible operational player stations, and a conservative complete
+seminar inventory. Approval must follow a fresh preview. It recruits only the
+missing Pilot trainees, trains every selected pilot to five stars with native
+inventory readback after each lesson, then assigns each to one still-vacant ship
+and requires native assigned-pilot readback. It reports requested, recruited,
+assigned, and blocked counts; no existing captain or shipboard crew is taken.
+
+Native evidence
+
+- X4 `md/fleet_reconstitution.xml` owns `reconstitute_fleet`, rejects fleet-unit
+  records that already have an object/build, finds compatible player-owned yards,
+  tests exact macro and missing loadout equipment, queues the native rebuild, and
+  rejoins the completed ship to its commander.
+- X4's preserved `common.xsd` contract defines generic player-yard construction
+  with explicit object, macro, loadout, faction, and returned build-task identity.
+- X4's object-command contract defines assigning a ship to a commander with an
+  explicit subordinate group, which is used only after native build completion.
+- X4 `aiscripts/order.repair.xml` defines the native Repair order parameters.
+- X4 `aiscripts/interrupt.restock.xml` provides the native compatible
+  repair-facility filtering used by Build 026's non-mutating handoff.
+- X4 `ui/addons/ego_detailmonitor/menu_ship_configuration.lua` owns repair price,
+  resource, payment, confirmation, Repair-order, and `upgradefleetunit` flows.
+- The permanent research record is
+  `Evidence/FOC_B026_NATIVE_REPAIR_REPLACEMENT_REBUILD_RESEARCH_20260901.md` in
+  the governed FOC repository and includes source hashes and official Egosoft
+  blueprint / ship-upgrade documentation links.
+
+Preserved safety boundaries
+
+- Player ownership, stable identity, captain presence, Home resolution, locks,
+  authority mode, incident age, mission/story protection, and native readback are
+  checked at the mutation boundary.
+- The exact completed Yaki reward-ship adapter and Geometric Owl protection remain
+  unchanged. No name, ID, macro, ownership alone, or cached UI state releases a
+  protected object.
+- Fleet sampling is capped at 500 ships; 100 fleets and 100 direct members per
+  fleet are displayed. Saved-plan application is capped at 100 Draft records;
+  Academy bulk assignment remains capped at 25 exact pairs per approval.
+- Live Activity remains save-persistent with 50 retained and 12 displayed rows.
+  Session History remains session-only and bounded.
+- Repair handoff itself mutates nothing. Rebuild confirmation is a native async
+  request and does not claim queued/building/completed state without refresh.
 - No live installation, promotion, publication, or push is performed by this
   build workflow.
 
-The source and TEST package may pass static and regression review, but behavior
-inside X4 remains RUNTIME ACCEPTANCE REQUIRED until RazorEQX tests this exact
-Build 020 artifact. Passing that test does not itself authorize GA promotion,
-Steam publication, GitHub publication, or push.
+Static validation and regression review cannot establish behavior inside X4.
+Every affected Build 035 behavior remains RUNTIME ACCEPTANCE REQUIRED until
+RazorEQX tests the exact staged TEST artifact. That acceptance does not authorize
+GA promotion, Steam publication, GitHub publication, push, or live installation.

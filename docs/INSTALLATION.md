@@ -11,7 +11,7 @@
 ## Manual installation
 
 1. Close X4: Foundations normally.
-2. Download [`FOC_v119_GA.zip`](../dist/FOC_v119_GA.zip).
+2. Download [`FOC_v134_GA.zip`](../dist/FOC_v134_GA.zip).
 3. Extract the archive.
 4. Copy the contained lowercase `jk_foc` folder into the X4 `extensions` directory.
 
@@ -36,8 +36,8 @@ Unsubscribe from the Workshop item or, for a manual installation, close X4 and r
 
 ## Verifying the archive
 
-The v1.19 GA archive SHA-256 is:
+The v1.34 GA archive SHA-256 is:
 
 ```text
-5D8870D3E21ABF6D84D4E64BFD3E9D8BEC802475301218D0ADD200D28A47C676
+4E3B0CB4E23DF0473BBF5AE54BC74464500C5F3F7BDD848C38A99F5CF837CAC8
 ```

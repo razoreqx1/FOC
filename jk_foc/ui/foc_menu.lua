@@ -2,16 +2,15 @@ local ffi = require("ffi")
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
-uint32_t GetAllFactionShips(UniverseID* result, uint32_t resultlen, const char* factionid);
 UniverseID GetPlayerOccupiedShipID(void);
 bool IsComponentOperational(UniverseID componentid);
 float GetTextHeight(const char*const text, const char*const fontname, const float fontsize, const float wordwrapwidth);
 ]]
 
 local C = ffi.C
-local MAX_SHIPS_PER_SAMPLE = 500
-local MAX_FLEETS_DISPLAYED = 100
 local HISTORY_LIMIT = 64
+local LIVE_ACTIVITY_LIMIT = 50
+local LIVE_ACTIVITY_VISIBLE = 12
 local ROW_POOL_LIMIT = 170
 local ROW_POOL_RESERVE = 5
 local FIRST_DRAW_LIMBO_ROWS = 1
@@ -25,6 +24,9 @@ local menu = {
     fleetTable = nil,
     sample = nil,
     history = {},
+    liveActivity = {},
+    liveActivityIncoming = nil,
+    activityView = "live",
     homeSectorByFleet = {},
     ordersByFleet = {},
     draftsByFleet = {},
@@ -32,18 +34,30 @@ local menu = {
     draftReadback = { key = nil, result = nil, state = nil },
     notice = nil,
     previews = { dispatch = nil, personnel = nil, global = nil, patrol = nil },
-    academy = { rows = {}, vacancies = {}, selectedRecruitID = nil, selectedVacancyID = nil, previewRecruitReady = false, previewAssignReady = false },
+    academy = { rows = {}, vacancies = {}, marineTargets = {}, recruitTrack = "PILOT", selectedRecruitID = nil, selectedVacancyID = nil, selectedMarineTargetID = nil, previewRecruitTrack = nil, previewPair = nil, previewBulkFill = false },
+    store = { balance = 0, pilot = { 0, 0, 0, 0, 0 }, marine = { 0, 0, 0, 0, 0 } },
     academyIncoming = nil,
     vacancyIncoming = nil,
+    marineTargetIncoming = nil,
     protectedIncoming = nil,
     protectedShipIDs = {},
     protectedShipCount = 0,
+    storyOverrideIncoming = nil,
+    storyOverrideIDs = {},
+    storyAnsweredIncoming = nil,
+    storyAnsweredIDs = {},
+    structuralFleetRows = {},
+    structuralIncoming = nil,
     pendingActionKind = nil,
     pendingHomeSelection = nil,
+    homeReturnMetadata = nil,
     restoreFleetKey = nil,
     selectedFleet = 1,
     showNonCombat = false,
     showFleetAdvanced = false,
+    fleetMode = "orders",
+    maintenance = { pending = false, commanderID = nil, fleetName = nil, repairRows = {}, lostRows = {}, selectedRepair = 1, selectedLost = 1, previewCommanderID = nil, status = "NOT SCANNED" },
+    safety = { reactionRepair = 100, playerRepair = 100, responseCap = 100, dirty = false },
     lastActivePatrolFleet = nil,
     renderedPage = nil,
     restoreTopRow = nil,
@@ -52,7 +66,7 @@ local menu = {
     listContentHeight = nil,
     phase = { readiness = "overview", fleets = "registry", response = "rules", settings = "automation" },
     plan = {
-        authority = "PREVIEW PLAN", fleetRole = "PATROL GROUP", naming = "FOC | ROLE | HOME | 01",
+        authority = "PREVIEW PLAN", fleetRole = "PATROL", naming = "FOC | ROLE | HOME | 01",
         coverage = "HOME SECTOR ONLY", distress = "PLAYER OWNED ONLY",
         patrolPattern = "LOOP", distressUrgency = 5, shipDamage = 70, stationDamage = 70,
         respondShips = "YES", respondStations = "YES", returnHome = "YES", sectorChoice = "ALL SAFE SECTORS IN RANGE",
@@ -90,7 +104,7 @@ local tabs = {
     { id = "fleets", label = "FLEETS" },
     { id = "readiness", label = "READINESS" },
     { id = "academy", label = "TRAINING ACADEMY" },
-    { id = "doctrine", label = "DOCTRINE" },
+    { id = "store", label = "ACADEMY STORE" },
     { id = "response", label = "FLEET RESPONSE" },
     { id = "activity", label = "ACTIVITY" },
     { id = "settings", label = "SETTINGS" },
@@ -98,28 +112,33 @@ local tabs = {
 
 local guides = {
     command = "Preview, approve, or stop bounded FOC planning. Unknown evidence always blocks mutation.",
-    fleets = "Choose one fleet, configure its Home and response rules, then send it directly from this page.",
+    fleets = "Choose one fleet, configure its proven orders and response rules, or open Repair / Replace / Rebuild for native maintenance.",
     readiness = "Missing and unknown evidence are blockers. No unknown value is counted as ready.",
-    academy = "Recruit up to 25 station-based trainees, then promote and assign a skill-ordered batch to proven captain vacancies.",
-    doctrine = "Configure home, coverage, patrol, protection, and fleet authority for the selected stable fleet.",
+    academy = "Recruit up to 25 combined Pilot and Marine trainees, train them, then assign them to proven destinations.",
+    store = "Buy Pilot Lessons or Marine Credits with credits. Every purchase is verified before FOC reports success.",
     response = "Configure FOC Fleet Response scope, safeguards, dispatch limits, and return behavior.",
-    activity = "Review this session's bounded FOC samples and player-requested refreshes.",
+    activity = "Watch proven FOC actions as they happen, or review this session's bounded history.",
     settings = "Configure global planning mode and review hard scan, mutation, cooldown, and audit bounds.",
 }
 
 local automationModes = { "PREVIEW PLAN", "APPLY APPROVED PLAN", "FULL AUTOMATION" }
-local fleetRoles = { "PATROL GROUP", "DEFENSE GROUP", "INTERCEPT GROUP", "RESCUE GROUP", "CONVOY SUPPORT GROUP", "RESERVE GROUP" }
-local coverageRanges = { "HOME SECTOR ONLY", "ONE GATE", "TWO GATES", "THREE GATES", "FOUR GATES", "FIVE GATES", "CUSTOM SECTOR LIST" }
-local distressScopes = { "PLAYER OWNED ONLY", "PLAYER AND ALLIED", "FRIENDLY OR NEUTRAL", "IGNORE NON-PLAYER" }
-local patrolPatterns = { "LOOP", "OUT AND BACK", "RANDOM WITHIN PATROL AREA" }
-local patrolSectorChoices = { "ALL SAFE SECTORS IN RANGE", "PLAYER-OWNED SECTORS ONLY", "CHOOSE SECTORS MYSELF" }
+local fleetRoles = { "PATROL", "GUARD HOME" }
+local coverageRanges = { "OFF", "HOME SECTOR ONLY", "ONE GATE", "TWO GATES", "THREE GATES", "FOUR GATES", "FIVE GATES" }
 local yesNoOptions = { "YES", "NO" }
 local urgencyOptions = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
 local damageOptions = { 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 }
+local repairThresholdOptions = { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100 }
+local responseFleetCapOptions = { 1, 5, 10, 20, 50, 100 }
 
-local function cycle(current, values)
-    for i, value in ipairs(values) do if value == current then return values[(i % #values) + 1] end end
-    return values[1]
+local function normalizeFleetRole(value)
+    local text = tostring(value or "")
+    return (text == "PATROL GROUP" or text == "PATROL") and "PATROL" or "GUARD HOME"
+end
+
+local function normalizeCoverage(value)
+    local text = tostring(value or "")
+    for _, option in ipairs(coverageRanges) do if text == option then return text end end
+    return "OFF"
 end
 
 local function clamp(value, low, high)
@@ -129,6 +148,48 @@ end
 local function safeText(value, fallback)
     if value == nil or tostring(value) == "" then return fallback or "UNKNOWN" end
     return tostring(value)
+end
+
+local function formatGameTime(value)
+    local seconds = math.max(0, math.floor(tonumber(value) or 0))
+    local day = math.floor(seconds / 86400) + 1
+    local remainder = seconds % 86400
+    local hours = math.floor(remainder / 3600)
+    local minutes = math.floor((remainder % 3600) / 60)
+    local displaySeconds = remainder % 60
+    return string.format("SAVE DAY %d, %02d:%02d:%02d", day, hours, minutes, displaySeconds)
+end
+
+local function activitySeverity(kind, detail, supplied)
+    if supplied == "RED_DAMAGE" or supplied == "YELLOW_DISTRESS" or supplied == "NORMAL" then return supplied end
+    local activityKind = tostring(kind or "")
+    local activityDetail = tostring(detail or "")
+    if activityKind == "SHIP_DESTROYED" or activityKind == "FLEET_REBUILD" then return "RED_DAMAGE" end
+    if activityKind == "DISTRESS" then
+        local hull = tonumber(activityDetail:match("|%s*SHIP%s*|%s*hull%s+(%d+)%s+percent"))
+        return hull and hull < 100 and "RED_DAMAGE" or "YELLOW_DISTRESS"
+    end
+    return "NORMAL"
+end
+
+local function loadLiveActivityRows(rows)
+    local restored = {}
+    if type(rows) == "table" then
+        for _, row in ipairs(rows) do
+            if type(row) == "table" and (tonumber(row[1]) == 1 or tonumber(row[1]) == 2) and tonumber(row[2]) then
+                restored[#restored + 1] = {
+                    id = tonumber(row[2]), time = tonumber(row[3]) or 0,
+                    kind = safeText(row[4], "ACTIVITY"), state = safeText(row[5], "RECORDED"),
+                    subject = safeText(row[6], "FOC"), detail = safeText(row[7], "No detail recorded."),
+                    severity = activitySeverity(row[4], row[7], row[8]),
+                }
+            end
+        end
+    end
+    table.sort(restored, function(a, b) return a.id > b.id end)
+    while #restored > LIVE_ACTIVITY_LIMIT do table.remove(restored) end
+    menu.liveActivity = restored
+    return #restored
 end
 
 local function loadAcademyRows(rows)
@@ -146,6 +207,8 @@ local function loadAcademyRows(rows)
                     seminar = safeText(row[8], "MAXIMUM PILOTING RANK"),
                     seminarCount = tonumber(row[9]) or 0,
                     valid = row[10] == true or row[10] == 1,
+                    track = safeText(row[11], "PILOT"),
+                    boarding = tonumber(row[12]),
                 }
             end
         end
@@ -158,6 +221,15 @@ local function loadAcademyRows(rows)
     end
     if not selectedStillExists then menu.academy.selectedRecruitID = restored[1] and tostring(restored[1].id) or nil end
     return #restored
+end
+
+local function loadStoreData(data)
+    if type(data) ~= "table" then return end
+    menu.store.balance = tonumber(data[1]) or menu.store.balance or 0
+    for tier = 1, 5 do
+        menu.store.pilot[tier] = tonumber(type(data[2]) == "table" and data[2][tier]) or 0
+        menu.store.marine[tier] = tonumber(type(data[3]) == "table" and data[3][tier]) or 0
+    end
 end
 
 local function loadProtectedShipIDs(rows)
@@ -178,7 +250,37 @@ local function isProtectedShipID(idcode)
     return menu.protectedShipIDs[tostring(idcode or "")] == true
 end
 
-local function selectedAcademyRecruit()
+local function loadStoryOverrideIDs(rows)
+    local restored = {}
+    if type(rows) == "table" then
+        for _, idcode in ipairs(rows) do
+            local key = tostring(idcode or "")
+            if key ~= "" and key ~= "UNKNOWN" then restored[key] = true end
+        end
+    end
+    menu.storyOverrideIDs = restored
+end
+
+local function isStoryOverrideID(idcode)
+    return menu.storyOverrideIDs[tostring(idcode or "")] == true
+end
+
+local function loadStoryAnsweredIDs(rows)
+    local restored = {}
+    if type(rows) == "table" then
+        for _, idcode in ipairs(rows) do
+            local key = tostring(idcode or "")
+            if key ~= "" and key ~= "UNKNOWN" then restored[key] = true end
+        end
+    end
+    menu.storyAnsweredIDs = restored
+end
+
+local function isStoryAnsweredID(idcode)
+    return menu.storyAnsweredIDs[tostring(idcode or "")] == true
+end
+
+local function selectedAcademyRecruit(track)
     local selectedID = tostring(menu.academy.selectedRecruitID or "")
     for _, recruit in ipairs(menu.academy.rows) do
         if tostring(recruit.id) == selectedID then return recruit end
@@ -186,10 +288,26 @@ local function selectedAcademyRecruit()
     return nil
 end
 
+local function academyRowsForTrack(track)
+    local rows = {}
+    for _, recruit in ipairs(menu.academy.rows) do
+        rows[#rows + 1] = recruit
+    end
+    return rows
+end
+
 local function selectedAcademyVacancy(vacancies)
     local selectedID = tostring(menu.academy.selectedVacancyID or "")
     for _, vacancy in ipairs(vacancies or {}) do
         if tostring(vacancy.key or "") == selectedID then return vacancy end
+    end
+    return nil
+end
+
+local function selectedMarineTarget(targets)
+    local selectedID = tostring(menu.academy.selectedMarineTargetID or "")
+    for _, target in ipairs(targets or {}) do
+        if tostring(target.key or "") == selectedID then return target end
     end
     return nil
 end
@@ -274,6 +392,44 @@ local function loadVacancyRows(rows)
     return #restored
 end
 
+local function loadMarineTargetRows(rows)
+    local restored = {}
+    if type(rows) == "table" then
+        for _, row in ipairs(rows) do
+            if type(row) == "table" and tonumber(row[1]) == 1 then
+                local component64 = bridgeComponent64(row[2])
+                if component64 then
+                    restored[#restored + 1] = {
+                        component = component64,
+                        key = tostring(component64),
+                        name = safeText(row[3], "Unnamed ship"),
+                        idcode = safeText(row[4], "UNKNOWN"),
+                        sector = safeText(row[5], "UNKNOWN SECTOR"),
+                        relationship = safeText(row[6], "UNCLASSIFIED"),
+                        people = tonumber(row[7]) or 0,
+                        capacity = tonumber(row[8]) or 0,
+                        marines = tonumber(row[9]) or 0,
+                    }
+                end
+            end
+        end
+    end
+    table.sort(restored, function(a, b)
+        if a.relationship == b.relationship then
+            if a.name == b.name then return a.key < b.key end
+            return a.name < b.name
+        end
+        return a.relationship < b.relationship
+    end)
+    menu.academy.marineTargets = restored
+    local selectedStillExists = false
+    for _, target in ipairs(restored) do
+        if target.key == tostring(menu.academy.selectedMarineTargetID or "") then selectedStillExists = true; break end
+    end
+    if not selectedStillExists then menu.academy.selectedMarineTargetID = restored[1] and restored[1].key or nil end
+    return #restored
+end
+
 local function componentName(component, fallback)
     local component64 = toComponent64(component)
     if not component64 then return fallback or "UNKNOWN" end
@@ -315,7 +471,7 @@ end
 
 local function newFleetOrders()
     return {
-        fleetRole = "PATROL GROUP", coverage = "HOME SECTOR ONLY", sectorChoice = "ALL SAFE SECTORS IN RANGE",
+        fleetRole = "PATROL", coverage = "HOME SECTOR ONLY", sectorChoice = "PLAYER OWNED ONLY",
         patrolPattern = "LOOP", respondShips = "YES", respondStations = "YES", distress = "PLAYER OWNED ONLY",
         distressUrgency = 5, shipDamage = 70, stationDamage = 70, returnHome = "YES",
         manualOverride = true, locked = true, nonCombatOverride = false, routePreview = nil,
@@ -371,8 +527,8 @@ local function restorePersistentDrafts(rows)
         if type(row) == "table" and (tonumber(row[1]) == 3 or tonumber(row[1]) == 4) and safeText(row[2], "") ~= "" then
             local key = "COMMANDER_IDCODE:" .. string.upper(tostring(row[2]))
             local orders = newFleetOrders()
-            orders.fleetRole = safeText(row[9], orders.fleetRole)
-            orders.coverage = safeText(row[10], orders.coverage)
+            orders.fleetRole = normalizeFleetRole(row[9])
+            orders.coverage = normalizeCoverage(row[10])
             orders.sectorChoice = safeText(row[11], orders.sectorChoice)
             orders.patrolPattern = safeText(row[12], orders.patrolPattern)
             orders.respondShips = safeText(row[13], orders.respondShips)
@@ -416,26 +572,27 @@ local function returnFromHomeMap(value)
         if not sectorKey then
             menu.pendingHomeSelection = nil
             menu.plan.lastResult = "HOME POINT NOT CHANGED - SECTOR IDENTITY IS UNKNOWN"
-            DebugError("[FOC][B020][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
-            rebuild(false)
-            return
+            DebugError("[FOC][B035][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
+        else
+            menu.homeSectorByFleet[pending.fleetKey] = {
+                id = sectorKey,
+                text = sectorName,
+                position = { tonumber(position[1]) or 0, tonumber(position[2]) or 0, tonumber(position[3]) or 0 },
+            }
+            markFleetOrdersChanged(pending.fleetKey, ordersForFleet(pending.fleetKey))
+            menu.plan.lastResult = "HOME POINT CHOSEN - DRAFT NOT YET SAVED - NO ORDERS SENT"
+            DebugError("[FOC][B035][HOME_MAP_SELECTED] fleet=" .. pending.fleetAudit .. " sector=" .. sectorName .. " sector_key=" .. sectorKey .. " mutation=NONE")
         end
-        menu.homeSectorByFleet[pending.fleetKey] = {
-            id = sectorKey,
-            text = sectorName,
-            position = { tonumber(position[1]) or 0, tonumber(position[2]) or 0, tonumber(position[3]) or 0 },
-        }
-        markFleetOrdersChanged(pending.fleetKey, ordersForFleet(pending.fleetKey))
-        menu.plan.lastResult = "HOME POINT CHOSEN - DRAFT NOT YET SAVED - NO ORDERS SENT"
-        DebugError("[FOC][B020][HOME_MAP_SELECTED] fleet=" .. pending.fleetAudit .. " sector=" .. sectorName .. " sector_key=" .. sectorKey .. " mutation=NONE")
     else
         menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP RETURN WAS INVALID - NO ORDERS SENT"
-        DebugError("[FOC][B020][HOME_MAP_INVALID] mutation=NONE")
+        DebugError("[FOC][B035][HOME_MAP_INVALID] mutation=NONE")
     end
     menu.pendingHomeSelection = nil
     local mapMenu = menuByName("MapMenu")
     if mapMenu then
-        Helper.closeMenuAndOpenNewMenu(mapMenu, menu.name, { 0, 0, menu.param[3], menu.param[4], menu.param[5], menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
+        local metadata = menu.homeReturnMetadata or {}
+        Helper.closeMenuAndOpenNewMenu(mapMenu, menu.name, { 0, 0, metadata[1], metadata[2], metadata[3], menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
+        menu.homeReturnMetadata = nil
         if mapMenu.cleanup then mapMenu.cleanup() end
     end
 end
@@ -466,7 +623,7 @@ local function installInteractHomeHook()
         return result
     end
     interactMenu.focHomeHookInstalled = true
-    DebugError("[FOC][B020][INTERACT_HOME_HOOK] installed=true mutation=NONE")
+    DebugError("[FOC][B035][INTERACT_HOME_HOOK] installed=true mutation=NONE")
     return true
 end
 
@@ -488,6 +645,11 @@ local function chooseHomeOnMap(selected)
         return
     end
     menu.plan.lastResult = "MAP OPEN - RIGHT-CLICK THE HOME POINT AND CHOOSE SET AS FOC HOME POINT"
+    menu.homeReturnMetadata = {
+        menu.param and menu.param[3] or nil,
+        menu.param and menu.param[4] or nil,
+        menu.param and menu.param[5] or nil,
+    }
     Helper.closeMenuAndOpenNewMenu(menu, "MapMenu", { 0, 0, true, focus })
     menu.frame = nil
     menu.mainTable = nil
@@ -507,9 +669,17 @@ local function statusColor(status)
 end
 
 local function directSubordinates(ship)
-    local ok, result = pcall(GetSubordinates, ship)
-    if ok and type(result) == "table" then return result end
-    return {}
+    local ok, result = pcall(GetSubordinates, ship, nil, true)
+    if not ok or type(result) ~= "table" then return {} end
+    local converted = {}
+    for _, subordinate in ipairs(result) do
+        local convertOK, subordinate64 = pcall(ConvertIDTo64Bit, subordinate)
+        if convertOK and subordinate64 and subordinate64 ~= 0 then
+            local validOK, valid = pcall(IsValidComponent, subordinate64)
+            if validOK and valid then converted[#converted + 1] = subordinate64 end
+        end
+    end
+    return converted
 end
 
 local function pilotEvidence(ship)
@@ -549,6 +719,8 @@ local function shipEvidence(ship)
         assignment = safeText(assignment, "UNASSIGNED"),
         primarypurpose = safeText(primarypurpose, "UNKNOWN"),
         isMission = isProtectedShipID(idcode),
+        storyOverride = isStoryOverrideID(idcode),
+        storyAnswered = isStoryAnsweredID(idcode),
         captainState = captainState,
         captain = pilot and componentName(pilot, "UNKNOWN") or (captainState == "MISSING" and "NO CAPTAIN" or "UNKNOWN"),
         order = order,
@@ -558,6 +730,10 @@ local function shipEvidence(ship)
 end
 
 local function classifyFleet(fleet)
+    if fleet.missionProtected then
+        local protected = fleet.protectedObject or fleet.commander
+        return "CRITICAL", "PROTECTED OBJECT " .. protected.name .. " [" .. protected.idcode .. "] | REASON: X4 REPORTS ACTIVE OR UNKNOWN MISSION/STORY PROTECTION | CONSEQUENCE: FOC WILL NOT REPLACE ANY ORDER IN THIS FLEET."
+    end
     if fleet.commander.captainState == "MISSING" then return "CRITICAL", "Commander has no captain." end
     if fleet.commander.captainState == "UNKNOWN" then return "UNKNOWN", "Commander captain state is unavailable." end
     if not fleet.commander.operational then return "CRITICAL", "Commander is not operational." end
@@ -568,41 +744,26 @@ local function classifyFleet(fleet)
 end
 
 local function sampleFleets(reason)
-    local buffer = ffi.new("UniverseID[?]", MAX_SHIPS_PER_SAMPLE)
-    local returned = tonumber(C.GetAllFactionShips(buffer, MAX_SHIPS_PER_SAMPLE, "player")) or 0
-    returned = math.min(returned, MAX_SHIPS_PER_SAMPLE)
     local fleets = {}
     local missingCaptainIssues = {}
     local unknownCaptainIssues = {}
     local counts = { ready = 0, degraded = 0, critical = 0, unknown = 0, missingCaptains = 0, unknownCaptains = 0, damaged = 0 }
-    for index = 0, returned - 1 do
-        local ship = toComponent64(buffer[index])
-        if ship then
-        local sampledIDCode = componentIDCode(ship)
-        if not isProtectedShipID(sampledIDCode) then
-        local _, sampledCaptainState = pilotEvidence(ship)
-        if sampledCaptainState ~= "PRESENT" then
-            if sampledCaptainState == "MISSING" then
-                counts.missingCaptains = counts.missingCaptains + 1
-            else
-                counts.unknownCaptains = counts.unknownCaptains + 1
-            end
-            local shipName, sector = GetComponentData(ship, "name", "sector")
-            local issue = {
-                    state = sampledCaptainState,
-                    name = safeText(shipName, "Unnamed ship"),
-                    idcode = sampledIDCode,
-                    sector = safeText(sector, "UNKNOWN"),
-                }
-            if sampledCaptainState == "MISSING" then table.insert(missingCaptainIssues, issue)
-            else table.insert(unknownCaptainIssues, issue) end
-        end
-        local commander = nil
-        local commanderOK, commanderValue = pcall(GetCommander, ship)
-        if commanderOK then commander = commanderValue end
-        local subordinates = directSubordinates(ship)
-        local commanderEvidence = shipEvidence(ship)
-        if #fleets < MAX_FLEETS_DISPLAYED and (not commander or commander == 0 or commander == "") and #subordinates > 0 then
+    local shipsExamined = 0
+    local function recordCaptainIssue(evidence)
+        if evidence.isMission or evidence.captainState == "PRESENT" then return end
+        if evidence.captainState == "MISSING" then counts.missingCaptains = counts.missingCaptains + 1
+        else counts.unknownCaptains = counts.unknownCaptains + 1 end
+        local issue = { state = evidence.captainState, name = evidence.name, idcode = evidence.idcode, sector = evidence.sector }
+        if evidence.captainState == "MISSING" then table.insert(missingCaptainIssues, issue)
+        else table.insert(unknownCaptainIssues, issue) end
+    end
+    for _, row in ipairs(menu.structuralFleetRows or {}) do
+        local commander64 = bridgeComponent64(row[2])
+        if commander64 then
+            local commanderEvidence = shipEvidence(commander64)
+            commanderEvidence.fleetname = safeText(row[4], commanderEvidence.fleetname)
+            shipsExamined = shipsExamined + 1
+            recordCaptainIssue(commanderEvidence)
             local record = {
                 commander = commanderEvidence,
                 members = {},
@@ -611,28 +772,31 @@ local function sampleFleets(reason)
                 damaged = 0,
                 unknown = 0,
                 missionProtected = commanderEvidence.isMission,
+                protectedObject = commanderEvidence.isMission and commanderEvidence or nil,
+                overrideObject = commanderEvidence.storyOverride and commanderEvidence or nil,
             }
-            local memberLimit = math.min(#subordinates, 100)
-            for memberIndex = 1, memberLimit do
-                local member64 = toComponent64(subordinates[memberIndex])
+            for _, rawMember in ipairs(type(row[5]) == "table" and row[5] or {}) do
+                local member64 = bridgeComponent64(rawMember)
                 local member = member64 and shipEvidence(member64) or nil
                 if member then
-                table.insert(record.members, member)
-                record.shipCount = record.shipCount + 1
-                if member.captainState == "MISSING" then record.missingCaptains = record.missingCaptains + 1 end
-                if member.hull and member.hull < 80 then record.damaged = record.damaged + 1 end
-                if member.isMission then record.missionProtected = true end
-                if not member.hull or not member.shield or member.captainState == "UNKNOWN" then record.unknown = record.unknown + 1 end
+                    shipsExamined = shipsExamined + 1
+                    recordCaptainIssue(member)
+                    table.insert(record.members, member)
+                    record.shipCount = record.shipCount + 1
+                    if member.captainState == "MISSING" then record.missingCaptains = record.missingCaptains + 1 end
+                    if member.hull and member.hull < 80 then record.damaged = record.damaged + 1 end
+                    if member.isMission then
+                        record.missionProtected = true
+                        if not record.protectedObject then record.protectedObject = member end
+                    end
+                    if member.storyOverride and not record.overrideObject then record.overrideObject = member end
+                    if not member.hull or not member.shield or member.captainState == "UNKNOWN" then record.unknown = record.unknown + 1 end
                 end
             end
             record.status, record.reason = classifyFleet(record)
-            if not record.missionProtected then
-                counts[string.lower(record.status)] = (counts[string.lower(record.status)] or 0) + 1
-                counts.damaged = counts.damaged + record.damaged
-                table.insert(fleets, record)
-            end
-        end
-        end
+            counts[string.lower(record.status)] = (counts[string.lower(record.status)] or 0) + 1
+            counts.damaged = counts.damaged + record.damaged
+            table.insert(fleets, record)
         end
     end
     table.sort(fleets, function(a, b)
@@ -644,8 +808,9 @@ local function sampleFleets(reason)
     local sample = {
         reason = reason or "OPEN",
         time = getElapsedTime(),
-        shipsExamined = returned,
-        capped = returned >= MAX_SHIPS_PER_SAMPLE,
+        shipsExamined = shipsExamined,
+        capped = false,
+        authoritative = true,
         fleets = fleets,
         captainIssues = missingCaptainIssues,
         unknownCaptainIssues = unknownCaptainIssues,
@@ -661,7 +826,50 @@ local function sampleFleets(reason)
     })
     while #menu.history > HISTORY_LIMIT do table.remove(menu.history) end
     menu.selectedFleet = clamp(menu.selectedFleet, 1, math.max(1, #fleets))
-    DebugError("[FOC][B020][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(returned) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " cap=" .. tostring(MAX_SHIPS_PER_SAMPLE) .. " mutation=NONE")
+    DebugError("[FOC][B035][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(shipsExamined) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " source=MD_STRUCTURAL_ALLSUBORDINATES authoritative=1 mutation=NONE")
+end
+
+local function loadStructuralFleetRows(rows)
+    local restored = {}
+    if type(rows) == "table" then
+        for _, row in ipairs(rows) do
+            if type(row) == "table" and tonumber(row[1]) == 1 and row[2] ~= nil and type(row[5]) == "table" then restored[#restored + 1] = row end
+        end
+    end
+    menu.structuralFleetRows = restored
+    return #restored
+end
+
+function menu.structuralSnapshotBegin(_, expected)
+    menu.structuralIncoming = { expected = tonumber(expected) or 0, rows = {}, current = nil, failed = false }
+end
+function menu.structuralSnapshotRowBegin(_, expected)
+    if not menu.structuralIncoming then return end
+    menu.structuralIncoming.current = { 1, nil, nil, nil, {}, expected = tonumber(expected) or 0 }
+end
+function menu.structuralSnapshotCommander(_, value) if menu.structuralIncoming and menu.structuralIncoming.current then menu.structuralIncoming.current[2] = value end end
+function menu.structuralSnapshotKey(_, value) if menu.structuralIncoming and menu.structuralIncoming.current then menu.structuralIncoming.current[3] = tostring(value or "") end end
+function menu.structuralSnapshotLabel(_, value) if menu.structuralIncoming and menu.structuralIncoming.current then menu.structuralIncoming.current[4] = tostring(value or "") end end
+function menu.structuralSnapshotMember(_, value) if menu.structuralIncoming and menu.structuralIncoming.current then table.insert(menu.structuralIncoming.current[5], value) end end
+function menu.structuralSnapshotRowCommit()
+    local incoming = menu.structuralIncoming
+    local row = incoming and incoming.current
+    if not row then return end
+    if row[2] == nil or row[3] == "" or #row[5] ~= row.expected then incoming.failed = true else table.insert(incoming.rows, row) end
+    incoming.current = nil
+end
+function menu.structuralSnapshotComplete()
+    local incoming = menu.structuralIncoming
+    menu.structuralIncoming = nil
+    if not incoming or incoming.failed or incoming.current or #incoming.rows ~= incoming.expected then
+        menu.notice = "FLEET REFRESH BLOCKED - INCOMPLETE AUTHORITATIVE STRUCTURAL SNAPSHOT; PREVIOUS FLEET LIST RETAINED"
+        menu.plan.lastState = "BLOCKED"
+    else
+        loadStructuralFleetRows(incoming.rows)
+        sampleFleets("MD_STRUCTURAL_REFRESH")
+        menu.notice = "FLEET LIST REFRESHED FROM AUTHORITATIVE STRUCTURAL DISCOVERY"
+    end
+    if menu.frame then menu.refresh(true) end
 end
 
 local function section(tableWidget, label)
@@ -756,11 +964,157 @@ local function auditAction(kind, detail, result, state, persistentData)
     rebuild(false)
 end
 
+function menu.maintenanceSnapshotBegin()
+    menu.maintenance.pending = true
+    menu.maintenance.commanderID = nil
+    menu.maintenance.fleetName = nil
+    menu.maintenance.lostRows = {}
+    menu.maintenance.repairRows = {}
+    menu.maintenance.incomingLost = {}
+    menu.maintenance.incomingRepair = {}
+    menu.maintenance.status = "SCANNING NATIVE FLEET RECORDS"
+end
+
+function menu.maintenanceRepairRowValue(field, value)
+    local row = menu.maintenance.incomingRepair or {}
+    menu.maintenance.incomingRepair = row
+    if field == "idcode" then row.idcode = safeText(value, "UNKNOWN")
+    elseif field == "name" then row.name = safeText(value, "UNKNOWN SHIP")
+    elseif field == "hull" then row.hull = tonumber(value)
+    elseif field == "scope" then row.scope = safeText(value, "PLAYER")
+    elseif field == "fleet" then row.fleet = safeText(value, "ALL PLAYER-OWNED DEFAULT")
+    elseif field == "threshold" then row.threshold = tonumber(value)
+    elseif field == "protected" then row.protected = value == true or value == 1 or value == "1"
+    elseif field == "playercontrolled" then row.playerOccupied = value == true or value == 1 or value == "1" end
+end
+
+function menu.maintenanceRepairRowCommit()
+    local row = menu.maintenance.incomingRepair
+    menu.maintenance.incomingRepair = {}
+    if not row or not row.idcode or not row.name or not row.hull or not row.scope or not row.threshold then return end
+    menu.maintenance.repairRows[#menu.maintenance.repairRows + 1] = row
+end
+
+function menu.maintenanceRepairRowID(_, value) menu.maintenanceRepairRowValue("idcode", value) end
+function menu.maintenanceRepairRowName(_, value) menu.maintenanceRepairRowValue("name", value) end
+function menu.maintenanceRepairRowHull(_, value) menu.maintenanceRepairRowValue("hull", value) end
+function menu.maintenanceRepairRowScope(_, value) menu.maintenanceRepairRowValue("scope", value) end
+function menu.maintenanceRepairRowFleet(_, value) menu.maintenanceRepairRowValue("fleet", value) end
+function menu.maintenanceRepairRowThreshold(_, value) menu.maintenanceRepairRowValue("threshold", value) end
+function menu.maintenanceRepairRowProtected(_, value) menu.maintenanceRepairRowValue("protected", value) end
+function menu.maintenanceRepairRowPlayerControlled(_, value) menu.maintenanceRepairRowValue("playercontrolled", value) end
+
+function menu.maintenanceMetaValue(field, value)
+    if field == "commander" then menu.maintenance.commanderID = safeText(value, "UNKNOWN")
+    elseif field == "fleet" then menu.maintenance.fleetName = safeText(value, "UNKNOWN FLEET")
+    elseif field == "status" then menu.maintenance.status = safeText(value, "UNKNOWN") end
+end
+
+function menu.maintenanceLostValue(field, value)
+    local row = menu.maintenance.incomingLost or {}
+    menu.maintenance.incomingLost = row
+    if field == "fleetunit" then row.fleetunit = value
+    elseif field == "index" then row.index = value
+    elseif field == "name" then row.name = safeText(value, "UNKNOWN LOST SHIP")
+    elseif field == "state" then row.state = safeText(value, "UNKNOWN")
+    elseif field == "signature" then row.signature = safeText(value, "UNKNOWN")
+    elseif field == "detail" then row.detail = safeText(value, "No native readiness detail was returned.")
+    elseif field == "ready" then row.ready = value == true or value == 1 or value == "1" end
+end
+
+function menu.maintenanceLostCommit()
+    local row = menu.maintenance.incomingLost
+    menu.maintenance.incomingLost = {}
+    if not row or row.index == nil or not row.state or not row.signature then return end
+    menu.maintenance.lostRows[#menu.maintenance.lostRows + 1] = row
+end
+
+function menu.maintenanceSnapshotComplete()
+    menu.maintenance.pending = false
+    menu.maintenance.incomingLost = nil
+    menu.maintenance.incomingRepair = nil
+    menu.maintenance.selectedRepair = clamp(menu.maintenance.selectedRepair, 1, math.max(1, #menu.maintenance.repairRows))
+    menu.maintenance.selectedLost = clamp(menu.maintenance.selectedLost, 1, math.max(1, #menu.maintenance.lostRows))
+    if menu.frame and menu.page == "fleets" and menu.fleetMode == "maintenance" then rebuild(false) end
+end
+
+function menu.maintenanceRepairOpenValue(field, value)
+    menu.maintenance.nativeOpen = menu.maintenance.nativeOpen or {}
+    menu.maintenance.nativeOpen[field] = value
+end
+
+local function openNativeMenu(name, params)
+    if not menu.frame or menu.closeInProgress then return end
+    menu.closeInProgress = true
+    AddUITriggeredEvent(menu.name, "closed", { reason = "native_handoff" })
+    Helper.closeMenuAndOpenNewMenu(menu, name, params)
+    menu.frame = nil
+    menu.closeInProgress = false
+end
+
+function menu.maintenanceRepairOpenComplete()
+    local handoff = menu.maintenance.nativeOpen
+    menu.maintenance.nativeOpen = nil
+    local ship = handoff and bridgeComponent64(handoff.ship)
+    local facility = handoff and bridgeComponent64(handoff.facility)
+    if not ship or not facility then
+        menu.maintenance.pending = false
+        menu.notice = "REPAIR BLOCKED - NO CURRENT COMPATIBLE NATIVE REPAIR FACILITY WAS PROVEN"
+        if menu.frame then rebuild(false) end
+        return
+    end
+    menu.maintenance.pending = false
+    openNativeMenu("ShipConfigurationMenu", { 0, 0, componentLuaID(facility), "upgrade", { tostring(ship) }, true })
+end
+
+function menu.maintenanceLostEditorValue(_, value)
+    menu.maintenance.nativeLostOpen = value
+end
+
+function menu.maintenanceLostEditorComplete()
+    local fleetunit = menu.maintenance.nativeLostOpen
+    menu.maintenance.nativeLostOpen = nil
+    menu.maintenance.pending = false
+    if not fleetunit then
+        menu.notice = "LOST-SHIP EDITOR BLOCKED - THE CURRENT NATIVE RECORD NO LONGER MATCHES THE SELECTED SNAPSHOT"
+        if menu.frame then rebuild(false) end
+        return
+    end
+    openNativeMenu("ShipConfigurationMenu", { 0, 0, nil, "upgradefleetunit", { fleetunit } })
+end
+
+local function requestMaintenanceSnapshot(selected)
+    local commanderID = safeText(selected and selected.commander and selected.commander.idcode, "GLOBAL")
+    if commanderID == "" or commanderID == "UNKNOWN" then commanderID = "GLOBAL" end
+    menu.maintenance.pending = true
+    menu.maintenance.status = commanderID == "GLOBAL" and "WAITING FOR GLOBAL ENROLLED-FLEET RECOVERY READBACK" or "WAITING FOR NATIVE AND GLOBAL RECOVERY READBACK"
+    AddUITriggeredEvent(menu.name, "maintenance_snapshot", commanderID)
+    rebuild(false)
+end
+
+local function requestNativeRepair(ship)
+    if not ship or menu.maintenance.pending then return end
+    menu.maintenance.pending = true
+    menu.maintenance.nativeOpen = nil
+    menu.notice = "FINDING A COMPATIBLE X4 REPAIR FACILITY - NO ORDER OR PAYMENT SENT"
+    AddUITriggeredEvent(menu.name, "maintenance_open_repair", { ship.idcode, ship.scope })
+    rebuild(false)
+end
+
+local function requestNativeLostEditor(selected, lost)
+    if not selected or not lost or menu.maintenance.pending then return end
+    menu.maintenance.pending = true
+    menu.maintenance.nativeLostOpen = nil
+    menu.notice = "REVALIDATING THE CURRENT LOST FLEET-UNIT RECORD - NO BUILD QUEUED"
+    AddUITriggeredEvent(menu.name, "maintenance_open_lost_editor", { selected.commander.idcode, lost.index, lost.signature })
+    rebuild(false)
+end
+
 local function requestFleetDraftSave(selected, key, orders, home)
     if menu.pendingDraftSaves[key] then
         menu.plan.lastResult = "DRAFT SAVE ALREADY PENDING - WAITING FOR PERSISTENT READBACK"
         menu.notice = menu.plan.lastResult
-        DebugError("[FOC][B020][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
+        DebugError("[FOC][B035][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
         rebuild(false)
         return
     end
@@ -796,7 +1150,7 @@ local function requestFleetDraftSave(selected, key, orders, home)
     menu.plan.lastState = "SAVE_PENDING"
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B020][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
+    DebugError("[FOC][B035][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
     rebuild(false)
 end
 
@@ -848,7 +1202,7 @@ local function requestFleetPatrolStart(selected, key, orders, home)
     menu.plan.lastState = payload[5]
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B020][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
+    DebugError("[FOC][B035][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
     rebuild(false)
 end
 
@@ -882,7 +1236,7 @@ local function draftSaveComplete()
         menu.history[1].state = state
         menu.history[1].result = result
     end
-    DebugError("[FOC][B020][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
+    DebugError("[FOC][B035][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
     menu.draftReadback = { key = nil, result = nil, state = nil }
     if menu.frame then rebuild(false) end
 end
@@ -908,9 +1262,48 @@ local function actionComplete()
         end
     end
     menu.pendingPatrolStart = nil
+    if completedKind == "SAVE_SAFETY_THRESHOLDS" and menu.plan.lastState == "SAFETY_THRESHOLDS_SAVED" then menu.safety.dirty = false end
+    if completedKind == "ACADEMY_PREVIEW_RECRUIT" then
+        if menu.plan.lastState ~= "ACADEMY_RECRUIT_READY" then menu.academy.previewRecruitTrack = nil end
+    elseif completedKind == "ACADEMY_RECRUIT" then
+        menu.academy.previewRecruitTrack = nil
+    end
+    local keepPending = completedKind == "ACADEMY_MARINE_ASSIGN" and menu.plan.lastState == "ACADEMY_MARINE_TRANSFER_PENDING"
     actionReadback = { result = nil, state = nil }
-    menu.pendingActionKind = nil
-    if menu.frame then sampleFleets("NATIVE READBACK"); rebuild(false) end
+    if not keepPending then menu.pendingActionKind = nil end
+    if menu.frame then
+        sampleFleets("NATIVE READBACK")
+        if menu.page == "fleets" and menu.fleetMode == "maintenance" and completedKind == "MAINTENANCE_REPLACE" then
+            menu.maintenance.pending = false
+            menu.maintenance.status = menu.plan.lastState == "FLEET_REBUILD_REQUESTED" and "REQUEST SENT - PRESS REFRESH TO VERIFY NATIVE BUILDING READBACK" or menu.plan.lastResult
+        end
+        rebuild(false)
+    end
+end
+
+local function liveActivityRow()
+    if not menu.liveActivityIncoming then menu.liveActivityIncoming = {} end
+    return menu.liveActivityIncoming
+end
+
+local function liveActivityID(_, value) liveActivityRow().id = tonumber(value) end
+local function liveActivityTime(_, value) liveActivityRow().time = tonumber(value) or 0 end
+local function liveActivityKind(_, value) liveActivityRow().kind = safeText(value, "ACTIVITY") end
+local function liveActivityState(_, value) liveActivityRow().state = safeText(value, "RECORDED") end
+local function liveActivitySubject(_, value) liveActivityRow().subject = safeText(value, "FOC") end
+local function liveActivityDetail(_, value) liveActivityRow().detail = safeText(value, "No detail recorded.") end
+local function liveActivitySeverity(_, value) liveActivityRow().severity = activitySeverity(liveActivityRow().kind, liveActivityRow().detail, value) end
+local function liveActivityCommit()
+    local row = menu.liveActivityIncoming
+    menu.liveActivityIncoming = nil
+    if not row or not row.id or not row.kind or not row.state or not row.subject or not row.detail then return end
+    row.severity = activitySeverity(row.kind, row.detail, row.severity)
+    for index = #menu.liveActivity, 1, -1 do
+        if menu.liveActivity[index].id == row.id then table.remove(menu.liveActivity, index) end
+    end
+    table.insert(menu.liveActivity, 1, row)
+    while #menu.liveActivity > LIVE_ACTIVITY_LIMIT do table.remove(menu.liveActivity) end
+    if menu.frame and menu.page == "activity" and menu.activityView == "live" then rebuild(false) end
 end
 
 local function academySnapshotBegin(_, expected)
@@ -931,6 +1324,8 @@ local function academySnapshotMorale(_, value) academyIncomingRow()[7] = tonumbe
 local function academySnapshotSeminar(_, value) academyIncomingRow()[8] = safeText(value, "MAXIMUM PILOTING RANK") end
 local function academySnapshotSeminarCount(_, value) academyIncomingRow()[9] = tonumber(value) or 0 end
 local function academySnapshotValid(_, value) academyIncomingRow()[10] = value == true or value == 1 or tostring(value) == "true" end
+local function academySnapshotTrack(_, value) academyIncomingRow()[11] = safeText(value, "PILOT") end
+local function academySnapshotBoarding(_, value) academyIncomingRow()[12] = tonumber(value) end
 
 local function academySnapshotRowCommit()
     local incoming = menu.academyIncoming
@@ -945,11 +1340,11 @@ local function academySnapshotComplete()
     local incoming = menu.academyIncoming
     menu.academyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B020][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadAcademyRows(incoming.rows)
-    DebugError("[FOC][B020][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -967,7 +1362,7 @@ local function protectedSnapshotComplete()
     local incoming = menu.protectedIncoming
     menu.protectedIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B020][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         if menu.plan.lastState == "REFRESH_PENDING" then
             menu.plan.lastState = "BLOCKED"
             menu.plan.lastResult = "REFRESH BLOCKED - PROTECTED SHIP SNAPSHOT WAS INCOMPLETE | PRIOR PROTECTION CACHE PRESERVED"
@@ -977,7 +1372,7 @@ local function protectedSnapshotComplete()
         return
     end
     loadProtectedShipIDs(incoming.rows)
-    DebugError("[FOC][B020][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then
         sampleFleets("MD_PROTECTION_REFRESH")
         if menu.plan.lastState == "REFRESH_PENDING" then
@@ -987,6 +1382,50 @@ local function protectedSnapshotComplete()
         end
         if not menu.pendingActionKind then rebuild(false) end
     end
+end
+
+local function storyOverrideSnapshotBegin(_, expected)
+    menu.storyOverrideIncoming = { expected = tonumber(expected) or -1, rows = {} }
+end
+
+local function storyOverrideSnapshotID(_, value)
+    if not menu.storyOverrideIncoming then menu.storyOverrideIncoming = { expected = -1, rows = {} } end
+    local idcode = safeText(value, "")
+    if idcode ~= "" and idcode ~= "UNKNOWN" then menu.storyOverrideIncoming.rows[#menu.storyOverrideIncoming.rows + 1] = idcode end
+end
+
+local function storyOverrideSnapshotComplete()
+    local incoming = menu.storyOverrideIncoming
+    menu.storyOverrideIncoming = nil
+    if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=STORY_OVERRIDES cache=PRESERVED")
+        return
+    end
+    loadStoryOverrideIDs(incoming.rows)
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=STORY_OVERRIDES rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    if menu.frame then sampleFleets("MD_STORY_OVERRIDE_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
+end
+
+function menu.storyAnsweredSnapshotBegin(_, expected)
+    menu.storyAnsweredIncoming = { expected = tonumber(expected) or -1, rows = {} }
+end
+
+function menu.storyAnsweredSnapshotID(_, value)
+    if not menu.storyAnsweredIncoming then menu.storyAnsweredIncoming = { expected = -1, rows = {} } end
+    local idcode = safeText(value, "")
+    if idcode ~= "" and idcode ~= "UNKNOWN" then menu.storyAnsweredIncoming.rows[#menu.storyAnsweredIncoming.rows + 1] = idcode end
+end
+
+function menu.storyAnsweredSnapshotComplete()
+    local incoming = menu.storyAnsweredIncoming
+    menu.storyAnsweredIncoming = nil
+    if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=STORY_ANSWERED cache=PRESERVED")
+        return
+    end
+    loadStoryAnsweredIDs(incoming.rows)
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=STORY_ANSWERED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    if menu.frame then sampleFleets("MD_STORY_ANSWERED_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
 end
 
 local function vacancySnapshotBegin(_, expected)
@@ -1016,12 +1455,74 @@ local function vacancySnapshotComplete()
     local incoming = menu.vacancyIncoming
     menu.vacancyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B020][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadVacancyRows(incoming.rows)
-    DebugError("[FOC][B020][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
+end
+
+local function marineTargetSnapshotBegin(_, expected)
+    menu.marineTargetIncoming = { expected = tonumber(expected) or -1, rows = {}, row = {} }
+end
+
+local function marineTargetIncomingRow()
+    if not menu.marineTargetIncoming then menu.marineTargetIncoming = { expected = -1, rows = {}, row = {} } end
+    return menu.marineTargetIncoming.row
+end
+
+local function marineTargetSnapshotComponent(_, value) marineTargetIncomingRow()[2] = value end
+local function marineTargetSnapshotName(_, value) marineTargetIncomingRow()[3] = safeText(value, "Unnamed ship") end
+local function marineTargetSnapshotIDCode(_, value) marineTargetIncomingRow()[4] = safeText(value, "UNKNOWN") end
+local function marineTargetSnapshotSector(_, value) marineTargetIncomingRow()[5] = safeText(value, "UNKNOWN SECTOR") end
+local function marineTargetSnapshotRelationship(_, value) marineTargetIncomingRow()[6] = safeText(value, "UNCLASSIFIED") end
+local function marineTargetSnapshotPeople(_, value) marineTargetIncomingRow()[7] = tonumber(value) or 0 end
+local function marineTargetSnapshotCapacity(_, value) marineTargetIncomingRow()[8] = tonumber(value) or 0 end
+local function marineTargetSnapshotMarines(_, value) marineTargetIncomingRow()[9] = tonumber(value) or 0 end
+
+local function marineTargetSnapshotRowCommit()
+    local incoming = menu.marineTargetIncoming
+    if not incoming then return end
+    local row = incoming.row
+    row[1] = 1
+    if row[2] and row[3] and row[4] and row[4] ~= "UNKNOWN" and row[6] then incoming.rows[#incoming.rows + 1] = row end
+    incoming.row = {}
+end
+
+local function marineTargetSnapshotComplete()
+    local incoming = menu.marineTargetIncoming
+    menu.marineTargetIncoming = nil
+    if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
+        DebugError("[FOC][B035][COLLECTION_REJECTED] collection=MARINE_TARGET expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        return
+    end
+    loadMarineTargetRows(incoming.rows)
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=MARINE_TARGET rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
+end
+
+local function storeSnapshotBegin()
+    menu.storeIncoming = { balance = 0, pilot = { 0, 0, 0, 0, 0 }, marine = { 0, 0, 0, 0, 0 } }
+end
+local function storeSnapshotBalance(_, value)
+    if not menu.storeIncoming then storeSnapshotBegin() end
+    menu.storeIncoming.balance = tonumber(value) or 0
+end
+local function storePilotTier(tier, value)
+    if not menu.storeIncoming then storeSnapshotBegin() end
+    menu.storeIncoming.pilot[tier] = tonumber(value) or 0
+end
+local function storeMarineTier(tier, value)
+    if not menu.storeIncoming then storeSnapshotBegin() end
+    menu.storeIncoming.marine[tier] = tonumber(value) or 0
+end
+local function storeSnapshotComplete()
+    if not menu.storeIncoming then return end
+    menu.store = menu.storeIncoming
+    menu.storeIncoming = nil
+    DebugError("[FOC][B035][COLLECTION_COMMIT] collection=ACADEMY_STORE tiers=5 balance=" .. tostring(menu.store.balance))
+    if menu.frame and not menu.pendingActionKind then rebuild(false) end
 end
 
 local function previewGlobalPlan()
@@ -1047,29 +1548,6 @@ local function previewDispatchPlan(selected, orders)
     local result = blocked and "DISPATCH PREVIEW BLOCKED - QUEST PROTECTION OR NON-COMBAT OVERRIDE REQUIRED | NO ORDER SENT" or "DISPATCH PREVIEW REQUESTED - FOC WILL REQUIRE A FRESH PLAYER-SHIP ATTACK, AN UNCLAIMED ATTACKER, AND A READY FLEET | NO ORDER SENT"
     menu.previews.dispatch = result
     auditAction("PREVIEW_DISPATCH", selected and selected.commander.idcode or "NONE", result, blocked and "PREVIEW_BLOCKED" or "PREVIEW_COMPLETE")
-end
-
-local function previewPatrolPlan(selected, orders, home)
-    local result
-    local state
-    if not selected or not orders then
-        result = "PATROL PREVIEW BLOCKED - SELECT A FLEET | NO ORDERS SENT"
-        state = "PREVIEW_BLOCKED"
-    elseif selected.missionProtected then
-        result = "PATROL PREVIEW BLOCKED - QUEST / MISSION SHIPS ARE NEVER IN FOC SCOPE | NO ORDERS SENT"
-        state = "PREVIEW_BLOCKED"
-    elseif selected.commander.primarypurpose ~= "fight" and not orders.nonCombatOverride then
-        result = "PATROL PREVIEW BLOCKED - NON-COMBAT FLEET REQUIRES EXPLICIT OVERRIDE | SUPPLY ORDER PROTECTED | NO ORDERS SENT"
-        state = "PREVIEW_BLOCKED"
-    elseif not home then
-        result = "PATROL PREVIEW BLOCKED - CHOOSE THIS FLEET'S HOME POINT | NO ORDERS SENT"
-        state = "PREVIEW_BLOCKED"
-    else
-        result = "PATROL PREVIEW COMPLETE - " .. selected.commander.fleetname .. " | HOME " .. home.text .. " | RANGE " .. orders.coverage .. " | PATTERN " .. orders.patrolPattern .. " | NO ORDERS SENT"
-        state = "PREVIEW_COMPLETE"
-    end
-    menu.previews.patrol = result
-    auditAction("PREVIEW_PATROL", selected and selected.commander.idcode or "NONE", result, state)
 end
 
 local function calculateRenderBudget(total, pageKey, options)
@@ -1126,13 +1604,13 @@ local function createHeader(frame, width)
     local titleHeight = Helper.scaleY(42)
     local tabHeight = Helper.scaleY(38)
     local headerHeight = titleHeight + tabHeight
-    local header = frame:addTable(9, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
+    local header = frame:addTable(10, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
     local title = header:addRow(true, { fixed = true })
     local screenTitle = menu.page == "fleets" and "FLEET ORDERS" or "PLAN CONTROL"
     local buildLabel = safeText(menu.param and menu.param[4], "FOC Build UNKNOWN"):gsub("^FOC%s+", ""):upper()
-    title[1]:setColSpan(8):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
-    title[9]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
-    title[9].handlers.onClick = function() menu.onCloseElement("close") end
+    title[1]:setColSpan(9):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
+    title[10]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
+    title[10].handlers.onClick = function() menu.onCloseElement("close") end
     local tabRow = header:addRow(true, { fixed = true })
     for index, tab in ipairs(tabs) do
         local properties = { active = true }
@@ -1144,9 +1622,9 @@ local function createHeader(frame, width)
             rebuild(true)
         end
     end
-    tabRow[9]:createButton({ active = true }):setText("REFRESH", { halign = "center" })
-    tabRow[9].handlers.onClick = function()
-        menu.notice = "REFRESH REQUESTED - WAITING FOR MD QUEST-PROTECTION SNAPSHOT"
+    tabRow[10]:createButton({ active = true }):setText("REFRESH", { halign = "center" })
+    tabRow[10].handlers.onClick = function()
+        menu.notice = "REFRESH REQUESTED - WAITING FOR AUTHORITATIVE MD FLEET AND QUEST-PROTECTION SNAPSHOTS"
         menu.plan.lastResult = menu.notice
         menu.plan.lastState = "REFRESH_PENDING"
         AddUITriggeredEvent(menu.name, "refresh", nil)
@@ -1160,9 +1638,6 @@ local function pageGuide(tableWidget)
     section(tableWidget, "START HERE")
     textRow(tableWidget, "Purpose", guides[menu.page], headingColor)
     textRow(tableWidget, "Authority", menu.plan.authority .. " - preview never mutates; apply routes require approval, revalidation, readback, and bounded authority.", passColor)
-    if menu.sample and menu.sample.capped then
-        textRow(tableWidget, "Sampling bound", "The native result reached the 500-ship cap. Results are partial and are not represented as complete.", warningColor)
-    end
     if menu.notice then textRow(tableWidget, "Last action", menu.notice, needsAction(menu.notice) and warningColor or passColor) end
 end
 
@@ -1239,16 +1714,24 @@ end
 
 local function fleetSelectorPane(tableWidget)
     section(tableWidget, "CHOOSE A FLEET")
-    textRow(tableWidget, "", "Combat fleets are shown by default. Reveal non-combat fleets only to review or override one deliberately.", headingColor)
-    actionRow(tableWidget, "Scope", menu.showNonCombat and "HIDE NON-COMBAT FLEETS" or "SHOW NON-COMBAT FLEETS", function() menu.showNonCombat = not menu.showNonCombat; menu.listPages["fleets.registry"] = 1; rebuild(true) end, true, warningColor)
+    textRow(tableWidget, "Scope", "All structurally eligible combat fleets from authoritative MD discovery are shown.", headingColor)
+    actionRow(tableWidget, "Fleet tools", menu.fleetMode == "maintenance" and "BACK TO FLEET ORDERS" or "REPAIR / REPLACE / REBUILD", function()
+        menu.fleetMode = menu.fleetMode == "maintenance" and "orders" or "maintenance"
+        menu.maintenance.previewCommanderID = nil
+        if menu.fleetMode == "maintenance" then requestMaintenanceSnapshot(menu.sample.fleets[menu.selectedFleet]) else rebuild(true) end
+    end, true, menu.fleetMode == "maintenance" and passColor or headingColor)
+    actionRow(tableWidget, "Safety", menu.fleetMode == "thresholds" and "BACK TO FLEET ORDERS" or "REPAIR THRESHOLDS / RESPONSE CAP", function()
+        menu.fleetMode = menu.fleetMode == "thresholds" and "orders" or "thresholds"
+        rebuild(true)
+    end, true, menu.fleetMode == "thresholds" and passColor or warningColor)
     local visibleFleets = {}
     for index, fleet in ipairs(menu.sample.fleets) do
         if menu.showNonCombat or fleet.commander.primarypurpose == "fight" then table.insert(visibleFleets, { index = index, fleet = fleet }) end
     end
     if not menu.showNonCombat and menu.sample.fleets[menu.selectedFleet] and menu.sample.fleets[menu.selectedFleet].commander.primarypurpose ~= "fight" and visibleFleets[1] then menu.selectedFleet = visibleFleets[1].index end
-    local first, last, _, pageCount = addPager(tableWidget, "fleets.registry", #visibleFleets, { fixedRows = 5, contentPixels = menu.listContentHeight, maximum = 17 })
+    local first, last, _, pageCount = addPager(tableWidget, "fleets.registry", #visibleFleets, { fixedRows = 6, contentPixels = menu.listContentHeight, maximum = 16 })
     local selectedRow = nil
-    local rowsBeforeFleets = 3 + (pageCount > 1 and 1 or 0)
+    local rowsBeforeFleets = 4 + (pageCount > 1 and 1 or 0)
     for visibleIndex = first, last do
         local entry = visibleFleets[visibleIndex]
         local fleet = entry and entry.fleet
@@ -1265,12 +1748,15 @@ local function fleetSelectorPane(tableWidget)
                 fleet.commander.fleetname .. "  |  " .. fleet.commander.sector .. selectedMark,
                 { halign = "left" }
             )
-            row[1].handlers.onClick = function() menu.selectedFleet = index; rebuild(true) end
+            row[1].handlers.onClick = function()
+                menu.selectedFleet = index
+                menu.maintenance.previewCommanderID = nil
+                if menu.fleetMode == "maintenance" then requestMaintenanceSnapshot(fleet) else rebuild(true) end
+            end
             if index == menu.selectedFleet then selectedRow = rowsBeforeFleets + (visibleIndex - first + 1) end
         end
     end
     if selectedRow then pcall(tableWidget.setSelectedRow, tableWidget, selectedRow) end
-    if menu.sample.capped then textRow(tableWidget, "LIMIT", "The 500-ship sample is partial.", warningColor) end
 end
 
 local function fleetOrdersPane(tableWidget)
@@ -1281,6 +1767,13 @@ local function fleetOrdersPane(tableWidget)
         textRow(tableWidget, "Flagship", selected.commander.name .. " [" .. selected.commander.idcode .. "]", headingColor)
         textRow(tableWidget, "Current location", selected.commander.sector .. "  |  " .. tostring(selected.shipCount) .. " ship(s)", neutralColor)
         textRow(tableWidget, "Captain / condition", selected.commander.captain .. " - " .. selected.commander.captainState .. "  |  Hull " .. percent(selected.commander.hull) .. "  |  Shields " .. percent(selected.commander.shield), statusColor(selected.status))
+        local memberSummary = {}
+        for index = 1, math.min(#selected.members, 8) do
+            local member = selected.members[index]
+            memberSummary[#memberSummary + 1] = member.name .. " [" .. member.idcode .. "] | " .. member.assignment .. " | Captain " .. member.captainState .. (member.isMission and " | MISSION/STORY PROTECTED" or "")
+        end
+        if #selected.members > 8 then memberSummary[#memberSummary + 1] = "+ " .. tostring(#selected.members - 8) .. " additional fleet member(s)" end
+        textRow(tableWidget, "Fleet members", #memberSummary > 0 and table.concat(memberSummary, "\n") or "NO SUBORDINATES REPORTED BY X4", selected.missionProtected and warningColor or neutralColor)
         textRow(tableWidget, "Before you start", "These settings are a draft. Previewing does not send orders.", passColor)
         if not selectedFleetKey then
             actionRequired(tableWidget,
@@ -1295,8 +1788,20 @@ local function fleetOrdersPane(tableWidget)
         local homeSector = homeSectorForFleet(selected)
         local homeSectorName = homeSector and homeSector.text or "NOT CHOSEN"
         if menu.notice then textRow(tableWidget, "Last action", menu.notice, needsAction(menu.notice) and warningColor or passColor) end
-        if selected.missionProtected then
-            textRow(tableWidget, "Quest protection", "MISSION / QUEST FLEET - FOC WILL NEVER CHANGE THIS FLEET. NO OVERRIDE IS AVAILABLE.", failureColor)
+        local storyShip = selected.protectedObject or selected.overrideObject
+        if storyShip and not storyShip.storyAnswered then
+            local storyStatus = selected.missionProtected and "YES - STORY OR MISSION IS STILL ACTIVE" or "NO - STORY OR MISSION IS FINISHED"
+            textRow(tableWidget, "Story ship", storyShip.name .. " [" .. storyShip.idcode .. "] | CURRENT ANSWER: " .. storyStatus, selected.missionProtected and criticalColor or passColor)
+            textRow(tableWidget, "Question", "Is this ship still being used by a story or mission?", headingColor)
+            textRow(tableWidget, "What this means", "Choose No only if that story or mission is finished. This changes FOC only; it does not change the game's story.", warningColor)
+            buttonPairRow(tableWidget,
+                "YES - STORY OR MISSION IS STILL ACTIVE", function()
+                    auditAction("SET_STORY_STATUS", storyShip.idcode, "SAVING YES - WAIT FOR CONFIRMATION", "STORY_STATUS_PENDING", "YES")
+                end,
+                "NO - STORY OR MISSION IS FINISHED", function()
+                    auditAction("SET_STORY_STATUS", storyShip.idcode, "SAVING NO - WAIT FOR CONFIRMATION", "STORY_STATUS_PENDING", "NO")
+                end,
+                warningColor, not menu.pendingActionKind, not menu.pendingActionKind)
         elseif selected.commander.primarypurpose ~= "fight" then
             textRow(tableWidget, "Reaction-force scope", "NON-COMBAT COMMANDER (" .. string.upper(selected.commander.primarypurpose) .. ") - SUPPLY OR LOGISTICS ORDERS ARE PROTECTED BY DEFAULT.", warningColor)
             actionRow(tableWidget, "Override", orders.nonCombatOverride and "OVERRIDE ACTIVE - DO THIS ANYWAY" or "OVERRIDE - DO THIS ANYWAY", function()
@@ -1306,8 +1811,8 @@ local function fleetOrdersPane(tableWidget)
             end, true, warningColor)
         end
 
-        section(tableWidget, "1  NORMAL PATROL")
-        dropdownRow(tableWidget, "Fleet job", fleetRoles, orders.fleetRole, function(value) orders.fleetRole = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
+        section(tableWidget, "1  FLEET ORDER")
+        dropdownRow(tableWidget, "Native order", fleetRoles, orders.fleetRole, function(value) orders.fleetRole = normalizeFleetRole(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
         actionRow(tableWidget, "Home sector", homeSectorName, function() chooseHomeOnMap(selected) end, true, homeSector and headingColor or warningColor)
         actionRow(tableWidget, "Choose home", "CHOOSE HOME POINT ON MAP", function() chooseHomeOnMap(selected) end, true, activeTabBackground)
         textRow(tableWidget, "Home point", homePointText(homeSector), homeSector and headingColor or warningColor)
@@ -1319,31 +1824,28 @@ local function fleetOrdersPane(tableWidget)
                 "Close other map or interaction menus, return to Fleets, and press CHOOSE HOME POINT ON MAP again.",
                 "fleets", "TRY FLEETS AGAIN")
         end
-        dropdownRow(tableWidget, "Patrol distance", coverageRanges, orders.coverage, function(value) orders.coverage = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
-        dropdownRow(tableWidget, "Patrol sectors", patrolSectorChoices, orders.sectorChoice, function(value) orders.sectorChoice = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
-        dropdownRow(tableWidget, "Patrol pattern", patrolPatterns, orders.patrolPattern, function(value) orders.patrolPattern = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
-
         section(tableWidget, "2  DISTRESS CALLS")
+        dropdownRow(tableWidget, "Response range", coverageRanges, orders.coverage, function(value) orders.coverage = normalizeCoverage(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
         dropdownRow(tableWidget, "Help my ships", yesNoOptions, orders.respondShips, function(value) orders.respondShips = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
         dropdownRow(tableWidget, "Help my stations", yesNoOptions, orders.respondStations, function(value) orders.respondStations = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
-        dropdownRow(tableWidget, "Help anyone else", distressScopes, orders.distress, function(value) orders.distress = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
+        textRow(tableWidget, "Eligible distress owners", "PLAYER-OWNED SHIPS AND STATIONS ONLY", passColor)
         dropdownRow(tableWidget, "Minimum urgency", urgencyOptions, orders.distressUrgency, function(value) orders.distressUrgency = tonumber(value) or 5; markFleetOrdersChanged(selectedFleetKey, orders) end, " / 10")
         textRow(tableWidget, "Urgency scale", "FOC derives urgency from damage: 1 is light damage; 10 is critical damage.", neutralColor)
         dropdownRow(tableWidget, "Help ships below", damageOptions, orders.shipDamage, function(value) orders.shipDamage = tonumber(value) or 70; markFleetOrdersChanged(selectedFleetKey, orders) end, "% hull")
         dropdownRow(tableWidget, "Help stations below", damageOptions, orders.stationDamage, function(value) orders.stationDamage = tonumber(value) or 70; markFleetOrdersChanged(selectedFleetKey, orders) end, "% hull")
-        dropdownRow(tableWidget, "Return to patrol", yesNoOptions, orders.returnHome, function(value) orders.returnHome = tostring(value); markFleetOrdersChanged(selectedFleetKey, orders) end)
+        textRow(tableWidget, "After response", "RETURN TO THE FLEET'S NATIVE DEFAULT ORDER", passColor)
 
         section(tableWidget, "3  READY TO SEND")
         local route = tableWidget:addRow(false)
         route[1]:createText("HOME", { halign = "center", color = passColor })
-        route[2]:createText("PATROL AREA", { halign = "center", color = headingColor })
+        route[2]:createText("FLEET ORDER", { halign = "center", color = headingColor })
         route[3]:createText("DISTRESS CALL", { halign = "center", color = warningColor })
         route[4]:createText("RETURN", { halign = "center", color = passColor })
         local routeValues = tableWidget:addRow(false)
         routeValues[1]:createText(homeSectorName, { halign = "center" })
-        routeValues[2]:createText(orders.coverage .. "\n" .. orders.patrolPattern, { halign = "center", wordwrap = true })
+        routeValues[2]:createText(orders.fleetRole, { halign = "center", wordwrap = true })
         routeValues[3]:createText("Urgency " .. tostring(orders.distressUrgency) .. "+\nShip " .. tostring(orders.shipDamage) .. "% | Station " .. tostring(orders.stationDamage) .. "%", { halign = "center", wordwrap = true })
-        routeValues[4]:createText(orders.returnHome == "YES" and "RETURN TO PATROL" or "STAY ON RESPONSE", { halign = "center", wordwrap = true })
+        routeValues[4]:createText("RESUME DEFAULT ORDER", { halign = "center", wordwrap = true })
         textRow(tableWidget, "What happens", "This saves this fleet, unlocks only this fleet, replaces its eligible current orders, starts patrol, and arms its distress response.", passColor)
         local patrolPending = menu.pendingActionKind == "START_FLEET_PATROL"
         local reactionEligible = not selected.missionProtected and (selected.commander.primarypurpose == "fight" or orders.nonCombatOverride)
@@ -1361,9 +1863,8 @@ local function fleetOrdersPane(tableWidget)
         section(tableWidget, "ADVANCED CONTROLS - OPTIONAL")
         actionRow(tableWidget, "Advanced", menu.showFleetAdvanced and "HIDE ADVANCED CONTROLS" or "SHOW ADVANCED CONTROLS", function() menu.showFleetAdvanced = not menu.showFleetAdvanced; rebuild(false) end, true, headingColor)
         if menu.showFleetAdvanced then
-        textRow(tableWidget, "Route status", orders.routePreview or "OPTIONAL PREVIEW - NO ORDERS SENT.", orders.routePreview and headingColor or warningColor)
         local pendingDraft = menu.pendingDraftSaves[selectedFleetKey]
-        buttonPairRow(tableWidget, pendingDraft and "SAVE PENDING - WAIT FOR READBACK" or "SAVE AS DRAFT", function()
+        actionRow(tableWidget, "Draft", pendingDraft and "SAVE PENDING - WAIT FOR READBACK" or "SAVE AS DRAFT", function()
             menu.plan.status = "DRAFT"
             if not homeSector then
                 menu.plan.lastResult = "DRAFT NOT SAVED - CHOOSE A HOME POINT ON THE MAP"
@@ -1371,15 +1872,7 @@ local function fleetOrdersPane(tableWidget)
                 return
             end
             requestFleetDraftSave(selected, selectedFleetKey, orders, homeSector)
-        end, "CHECK ROUTE - NO ORDERS", function()
-            if not homeSector then
-                orders.routePreview = "BLOCKED: Choose a Home point on the map first. NO ORDERS SENT."
-                rebuild(false)
-                return
-            end
-            orders.routePreview = "PREVIEW ONLY - NO ORDERS SENT. CHECKED: " .. homeSector.text .. " > " .. orders.coverage .. " > DISTRESS " .. tostring(orders.distressUrgency) .. "+ > " .. (orders.returnHome == "YES" and "RETURN TO PATROL" or "STAY ON RESPONSE") .. ". Use SEND THIS FLEET ON PATROL when ready."
-            auditAction("PREVIEW_ROUTE", selectedFleetAudit .. " home=" .. homeSector.text .. " home_key=" .. homeSector.id, orders.routePreview, "PREVIEW_COMPLETE")
-        end, activeTabBackground, not pendingDraft, true)
+        end, not pendingDraft, headingColor)
         textRow(tableWidget, "Draft status", savedDraft and "DRAFT SAVED IN GAME STATE - NO ORDERS WERE SENT" or pendingDraft and "SAVE REQUEST SENT - WAITING FOR PERSISTENT READBACK" or "NOT SAVED - PRESS SAVE AS DRAFT", savedDraft and passColor or warningColor)
         actionRow(tableWidget, "Automation lock", orders.locked and "LOCKED - FOC CANNOT CHANGE THIS FLEET" or "UNLOCKED - APPROVED PLANS MAY CHANGE THIS FLEET", function() orders.locked = not orders.locked; markFleetOrdersChanged(selectedFleetKey, orders); rebuild(false) end, true, warningColor)
         local recallLabel = selected.missionProtected and "BLOCKED - MISSION / QUEST FLEET" or (reactionEligible and "RECALL TO HOME POST" or "BLOCKED - NON-COMBAT OVERRIDE REQUIRED")
@@ -1398,6 +1891,99 @@ local function fleetOrdersPane(tableWidget)
         section(tableWidget, "FLEET ORDERS")
         textRow(tableWidget, "Start here", "Choose a fleet on the left.", warningColor)
     end
+end
+
+local function fleetMaintenancePane(tableWidget)
+    local selected = menu.sample.fleets[menu.selectedFleet]
+    local commanderID = safeText(selected and selected.commander and selected.commander.idcode, "GLOBAL")
+    section(tableWidget, "REPAIR / REPLACE / REBUILD")
+    if selected then
+        textRow(tableWidget, "Current fleet", selected.commander.fleetname .. " | " .. selected.commander.name .. " [" .. commanderID .. "] | " .. tostring(selected.shipCount) .. " current ship(s)", headingColor)
+    else
+        textRow(tableWidget, "Current fleet", "NO LIVING FLEET COMMANDER SELECTED - GLOBAL RECOVERY REMAINS AVAILABLE", warningColor)
+    end
+    textRow(tableWidget, "Recovery scope", "Current-fleet native records plus persistent exact losses from every enrolled fleet. This keeps a destroyed-command fleet recoverable even after it disappears from X4's live fleet list.", passColor)
+    textRow(tableWidget, "Safety", "FOC rechecks ownership, mission/story protection, player control, current orders, native yards, blueprints, equipment and duplicate build state at every action.", passColor)
+    actionRow(tableWidget, "Native status", menu.maintenance.pending and "REFRESH IN PROGRESS" or "REFRESH REPAIR / REBUILD READBACK", function() requestMaintenanceSnapshot(selected) end, not menu.maintenance.pending, menu.maintenance.pending and warningColor or headingColor)
+    textRow(tableWidget, "Rebuild scan", menu.maintenance.status, needsAction(menu.maintenance.status) and warningColor or neutralColor)
+
+    section(tableWidget, "1  REPAIR CURRENT SHIPS")
+    textRow(tableWidget, "How repair works", "Choose a damaged current ship. FOC finds a known compatible facility, then opens X4's native Repair / Upgrade screen. X4 shows the exact price and resources and requires your confirmation. FOC never performs a free repair or claims completion here.", headingColor)
+    local damaged = menu.maintenance.repairRows
+    if #damaged == 0 then
+        textRow(tableWidget, "Result", "No player-owned ship is currently at or below its saved repair threshold. Surface-component-only damage remains visible in X4's native repair screen.", passColor)
+    else
+        menu.maintenance.selectedRepair = clamp(menu.maintenance.selectedRepair, 1, #damaged)
+        local repairOptions = {}
+        for index, ship in ipairs(damaged) do repairOptions[#repairOptions + 1] = { id = index, text = ship.name .. " [" .. ship.idcode .. "] | Hull " .. percent(ship.hull) .. " | " .. ship.scope .. " <= " .. tostring(ship.threshold) .. "%", icon = "", displayremoveoption = false } end
+        local repairRow = tableWidget:addRow(true)
+        repairRow[1]:createText("Damaged ship", { color = neutralColor })
+        repairRow[2]:setColSpan(3):createDropDown(repairOptions, { active = true, startOption = menu.maintenance.selectedRepair, height = Helper.standardButtonHeight })
+        repairRow[2].handlers.onDropDownConfirmed = function(_, value) menu.maintenance.selectedRepair = tonumber(value) or 1; rebuild(false) end
+        local repairShip = damaged[menu.maintenance.selectedRepair]
+        textRow(tableWidget, "Eligibility", repairShip.fleet .. " | " .. repairShip.scope .. " threshold " .. tostring(repairShip.threshold) .. "% hull", headingColor)
+        local repairBlocked = repairShip.protected or repairShip.playerOccupied or menu.maintenance.pending
+        local repairLabel = repairShip.playerOccupied and "BLOCKED - PLAYER IS CONTROLLING THIS SHIP" or repairShip.protected and "BLOCKED - MISSION / STORY PROTECTED" or menu.maintenance.pending and "WAIT FOR CURRENT NATIVE READBACK" or "OPEN X4 NATIVE REPAIR SCREEN"
+        actionRow(tableWidget, "Repair", repairLabel, function() requestNativeRepair(repairShip) end, not repairBlocked, repairBlocked and warningColor or passColor)
+    end
+
+    section(tableWidget, "2  LOST-SHIP BLUEPRINTS AND LOADOUTS")
+    textRow(tableWidget, "Blueprint rule", "FOC shows living-command native fleet-unit losses plus persistent exact recovery-ledger losses from every enrolled fleet. Ship and equipment blueprints/resources are enforced. FOC does not buy blueprints or substitute a guessed design.", headingColor)
+    local lost = menu.maintenance.lostRows
+    if #lost == 0 then
+        textRow(tableWidget, "Result", menu.maintenance.pending and "Waiting for native and recovery-ledger records." or "No native or enrolled-fleet recovery loss was returned.", menu.maintenance.pending and warningColor or passColor)
+    else
+        menu.maintenance.selectedLost = clamp(menu.maintenance.selectedLost, 1, #lost)
+        local lostOptions = {}
+        for index, row in ipairs(lost) do lostOptions[#lostOptions + 1] = { id = index, text = row.name .. " | " .. row.state, icon = "", displayremoveoption = false } end
+        local lostRow = tableWidget:addRow(true)
+        lostRow[1]:createText("Lost record", { color = neutralColor })
+        lostRow[2]:setColSpan(3):createDropDown(lostOptions, { active = true, startOption = menu.maintenance.selectedLost, height = Helper.standardButtonHeight })
+        lostRow[2].handlers.onDropDownConfirmed = function(_, value) menu.maintenance.selectedLost = tonumber(value) or 1; menu.maintenance.previewCommanderID = nil; rebuild(false) end
+        local selectedLost = lost[menu.maintenance.selectedLost]
+        textRow(tableWidget, "Native readiness", selectedLost.detail, selectedLost.ready and passColor or warningColor)
+        actionRow(tableWidget, "Blueprint / loadout", "OPEN X4 LOST-SHIP BLUEPRINT EDITOR", function()
+            requestNativeLostEditor(selected, selectedLost)
+        end, selected ~= nil and selectedLost.fleetunit ~= nil and selectedLost.state ~= "BUILDING" and not menu.maintenance.pending, headingColor)
+    end
+
+    section(tableWidget, "3  REPLACE / REBUILD LOST SHIPS")
+    local readyCount = 0
+    for _, row in ipairs(lost) do if row.ready then readyCount = readyCount + 1 end end
+    textRow(tableWidget, "What X4 will do", "Queue each eligible exact record at a compatible player-owned yard, reject missing ship/equipment capability, wait for native build completion, then restore its name and original fleet hierarchy when a commander exists. Rebuilt ships may still need captains.", passColor)
+    local previewed = menu.maintenance.previewCommanderID == commanderID
+    actionRow(tableWidget, "Preview", "PREVIEW " .. tostring(readyCount) .. " READY LOST SHIP(S) - NO BUILD QUEUED", function()
+        menu.maintenance.previewCommanderID = commanderID
+        menu.notice = "REBUILD PREVIEW COMPLETE - " .. tostring(readyCount) .. " CURRENT NATIVE OR ENROLLED-FLEET LOSS RECORD(S) READY | NOTHING QUEUED"
+        rebuild(false)
+    end, not menu.maintenance.pending and #lost > 0, headingColor)
+    local selectedProtected = selected and selected.missionProtected or false
+    local canConfirm = previewed and readyCount > 0 and not selectedProtected and not menu.pendingActionKind and not menu.maintenance.pending
+    local replaceLabel = not previewed and "PREVIEW REQUIRED BEFORE QUEUING" or readyCount == 0 and "BLOCKED - NO LOST RECORD IS READY" or selectedProtected and "BLOCKED - MISSION / STORY PROTECTED" or "CONFIRM: QUEUE EXACT REBUILDS FOR READY LOST SHIPS"
+    actionRow(tableWidget, "Replace / rebuild", replaceLabel, function()
+        menu.maintenance.previewCommanderID = nil
+        auditAction("MAINTENANCE_REPLACE", commanderID, "EXACT FLEET REBUILD REQUEST SENT - REFRESH TO CONFIRM QUEUED / BUILDING RECORDS", "FLEET_REBUILD_REQUESTED")
+    end, canConfirm, canConfirm and warningColor or neutralColor)
+    textRow(tableWidget, "Authority", "This action consumes only your player-owned yard's normal X4 build resources. It sends no NPC-yard purchase and performs no automatic blueprint purchase.", warningColor)
+end
+
+local function fleetSafetyPane(tableWidget)
+    section(tableWidget, "REPAIR THRESHOLDS / RESPONSE FLOOD GATE")
+    textRow(tableWidget, "Purpose", "These values control which damaged ships appear for manual native repair and how large a whole reaction fleet may be when responding to one distress. They never spend credits, buy blueprints, detach ships, or issue subordinate orders.", headingColor)
+    section(tableWidget, "1  REPAIR ELIGIBILITY")
+    dropdownRow(tableWidget, "Reaction-force ships", repairThresholdOptions, menu.safety.reactionRepair, function(value) menu.safety.reactionRepair = tonumber(value) or 100; menu.safety.dirty = true end, "% hull")
+    dropdownRow(tableWidget, "All player-owned default", repairThresholdOptions, menu.safety.playerRepair, function(value) menu.safety.playerRepair = tonumber(value) or 100; menu.safety.dirty = true end, "% hull")
+    textRow(tableWidget, "Threshold rule", "A damaged ship is offered when its hull is at or below the applicable value. Reaction-force membership takes precedence. 0% disables that scope because a surviving ship cannot qualify.", passColor)
+    section(tableWidget, "2  DISTRESS RESPONSE FLOOD GATE")
+    dropdownRow(tableWidget, "Maximum fleet ships", responseFleetCapOptions, menu.safety.responseCap, function(value) menu.safety.responseCap = tonumber(value) or 100; menu.safety.dirty = true end, " ships")
+    textRow(tableWidget, "Response rule", "FOC chooses one closest eligible fleet. Commander plus all subordinates must fit under this cap. Oversized fleets are skipped; fleets are never split.", passColor)
+    textRow(tableWidget, "Repeat protection", "One uniquely named response order is attempted. The commander and victim stay locked until recovery above the captured distress threshold, or victim/attacker/commander destruction. Readback failure does not permit another order.", passColor)
+    section(tableWidget, "3  SAVE")
+    actionRow(tableWidget, "Safety settings", menu.pendingActionKind == "SAVE_SAFETY_THRESHOLDS" and "SAVE PENDING - WAIT FOR READBACK" or menu.safety.dirty and "SAVE REPAIR THRESHOLDS AND RESPONSE CAP" or "SAVED VALUES - PRESS TO RECONFIRM", function()
+        auditAction("SAVE_SAFETY_THRESHOLDS", "GLOBAL", "SAFETY THRESHOLD SAVE REQUESTED - PERSISTENT READBACK REQUIRED", "SAFETY_SAVE_PENDING", { menu.safety.reactionRepair, menu.safety.playerRepair, menu.safety.responseCap })
+    end, not menu.pendingActionKind, menu.safety.dirty and warningColor or passColor)
+    textRow(tableWidget, "Current draft", "Reaction repair " .. tostring(menu.safety.reactionRepair) .. "% | All-player default " .. tostring(menu.safety.playerRepair) .. "% | Whole-fleet response cap " .. tostring(menu.safety.responseCap) .. " ships", menu.safety.dirty and warningColor or passColor)
+    textRow(tableWidget, "Last result", menu.plan.lastResult, needsAction(menu.plan.lastResult) and warningColor or passColor)
 end
 
 local function readinessPage(tableWidget)
@@ -1442,10 +2028,11 @@ end
 
 local function academyPage(tableWidget)
     local academy = menu.academy
-    local vacancies = academy.vacancies
-    if not selectedAcademyVacancy(vacancies) then academy.selectedVacancyID = vacancies[1] and vacancies[1].key or nil end
-    local recruit = selectedAcademyRecruit()
-    local vacancy = selectedAcademyVacancy(vacancies)
+    local track = academy.recruitTrack == "MARINE" and "MARINE" or "PILOT"
+    local trackRows = academyRowsForTrack(track)
+    if not selectedAcademyRecruit(track) then academy.selectedRecruitID = trackRows[1] and tostring(trackRows[1].id) or nil end
+    if not selectedAcademyVacancy(academy.vacancies) then academy.selectedVacancyID = academy.vacancies[1] and academy.vacancies[1].key or nil end
+    if not selectedMarineTarget(academy.marineTargets) then academy.selectedMarineTargetID = academy.marineTargets[1] and academy.marineTargets[1].key or nil end
 
     local function rejectLocal(message)
         menu.plan.lastState = "BLOCKED"
@@ -1456,188 +2043,209 @@ local function academyPage(tableWidget)
     end
 
     section(tableWidget, "TRAINING ACADEMY")
-    textRow(tableWidget, "Purpose", "Maintain a station-based reserve of up to 25 pilot trainees without removing marines or service crew from deployed ships.", headingColor)
-    textRow(tableWidget, "Capacity", tostring(#academy.rows) .. " / 25 retained trainees", #academy.rows < 25 and warningColor or passColor)
-    textRow(tableWidget, "Recruitment safety", "Operational player-owned stations only. Mission/story personnel, managers, existing captains, shipboard crew, and marines are never selected.", passColor)
-    actionRow(tableWidget, "Recruitment", "PREVIEW RECRUITMENT", function()
-        academy.previewRecruitReady = false
-        auditAction("ACADEMY_PREVIEW_RECRUIT", "CAPACITY_25", "RECRUITMENT PREVIEW REQUESTED - NO PERSONNEL CHANGED", "ACADEMY_PREVIEW_PENDING")
-    end, #academy.rows < 25, headingColor)
-    actionRow(tableWidget, "Recruitment", "APPROVE RECRUITMENT TO CAPACITY", function()
-        academy.previewRecruitReady = false
-        auditAction("ACADEMY_RECRUIT", "CAPACITY_25", "ACADEMY RECRUITMENT REQUEST SENT - NATIVE READBACK REQUIRED", "ACADEMY_RECRUIT_PENDING")
-    end, menu.plan.lastState == "ACADEMY_RECRUIT_READY" and #academy.rows < 25, warningColor)
-
-    section(tableWidget, "BULK PROMOTE AND ASSIGN")
-    textRow(tableWidget, "Batch rule", "Immediately processes at most 25 retained trainees, highest current piloting skill first. The complete batch seminar requirement is checked before anything changes.", headingColor)
-    textRow(tableWidget, "Native safety", "Every trainee and ship is revalidated. Each captain must reach five stars and match the ship's native assigned-pilot readback before that Academy record is removed.", passColor)
-    actionRow(tableWidget, "Bulk approval", "PROMOTE AND ASSIGN NEXT 25 CAPTAINS", function()
-        if menu.pendingActionKind then
-            rejectLocal("BULK ASSIGNMENT BLOCKED - ANOTHER FOC TRANSACTION IS STILL PENDING | NOTHING CHANGED")
-            return
-        end
-        if #academy.rows == 0 or #academy.vacancies == 0 then
-            rejectLocal("BULK ASSIGNMENT BLOCKED - RECRUIT TRAINEES AND REQUIRE AT LEAST ONE PROVEN CAPTAIN VACANCY | NOTHING CHANGED")
-            return
-        end
+    textRow(tableWidget, "Purpose", "Maintain one shared station-based reserve. Every retained trainee can receive Pilot or Marine training, then be assigned under the selected focus. The roster can never exceed 25 NPCs.", headingColor)
+    textRow(tableWidget, "Capacity", tostring(#academy.rows) .. " / 25 SHARED TRAINEES | AVAILABLE TO PILOT AND MARINE", #academy.rows < 25 and warningColor or passColor)
+    dropdownRow(tableWidget, "Training focus", { "PILOT", "MARINE" }, track, function(value)
+        academy.recruitTrack = value == "MARINE" and "MARINE" or "PILOT"
+        local rows = academyRowsForTrack(academy.recruitTrack)
+        academy.selectedRecruitID = rows[1] and tostring(rows[1].id) or nil
         academy.previewPair = nil
-        auditAction("ACADEMY_BULK_ASSIGN", "SKILL_DESCENDING_BOUND_25", "BULK CAPTAIN REQUEST SENT - COMPLETE SEMINAR PREFLIGHT AND NATIVE READBACK REQUIRED", "ACADEMY_BULK_PENDING")
-    end, #academy.rows > 0 and #academy.vacancies > 0 and menu.pendingActionKind == nil, warningColor)
+    end)
+    textRow(tableWidget, "Recruitment safety", "One NPC per approval from an operational player station. Existing shipboard crew, mission/story people, managers, and captains are never taken.", passColor)
+    actionRow(tableWidget, "Recruitment", "PREVIEW RECRUITMENT", function()
+        academy.previewRecruitTrack = academy.recruitTrack
+        auditAction("ACADEMY_PREVIEW_RECRUIT", academy.recruitTrack, academy.recruitTrack .. " RECRUITMENT PREVIEW REQUESTED - NOTHING CHANGED", "ACADEMY_PREVIEW_PENDING")
+    end, #academy.rows < 25 and menu.pendingActionKind == nil, headingColor)
+    actionRow(tableWidget, "Recruitment", "APPROVE ONE " .. academy.recruitTrack .. " TRAINEE", function()
+        auditAction("ACADEMY_RECRUIT", academy.recruitTrack, academy.recruitTrack .. " RECRUITMENT REQUEST SENT - NATIVE ROSTER READBACK REQUIRED", "ACADEMY_RECRUIT_PENDING")
+    end, menu.plan.lastState == "ACADEMY_RECRUIT_READY" and academy.previewRecruitTrack == academy.recruitTrack and #academy.rows < 25 and menu.pendingActionKind == nil, warningColor)
 
-    section(tableWidget, "SELECT SHIP AND CREW")
-    if #vacancies == 0 then
-        textRow(tableWidget, "1. Destination ship", "No proven captain vacancy is available in the current bounded sample.", passColor)
+    section(tableWidget, "SELECT " .. track .. " TRAINEE")
+    if #trackRows == 0 then
+        textRow(tableWidget, "Trainee", "No retained Academy trainees. Preview and approve one recruitment while capacity remains.", warningColor)
     else
         local options = {}
-        for _, issue in ipairs(vacancies) do
-            options[#options + 1] = { id = issue.key, text = issue.name .. " [" .. issue.idcode .. "] - " .. issue.sector, icon = "", displayremoveoption = false }
+        for _, rowData in ipairs(trackRows) do
+            local skill = track == "PILOT" and rowData.piloting or rowData.boarding
+            options[#options + 1] = { id = tostring(rowData.id), text = rowData.name .. " | " .. track .. " " .. (skill and string.format("%.1f / 5", skill / 3) or "UNKNOWN") .. " | " .. rowData.origin, icon = "", displayremoveoption = false }
         end
         local row = tableWidget:addRow(true)
-        row[1]:createText("1. Destination ship", { color = neutralColor })
-        local dropdown = row[2]:setColSpan(3):createDropDown(options, { active = true, startOption = academy.selectedVacancyID, height = Helper.standardButtonHeight })
-        row[2].handlers.onDropDownConfirmed = function(_, value)
-            academy.selectedVacancyID = tostring(value or "")
-            academy.previewAssignReady = false
-            academy.previewPair = nil
-            rebuild(false)
-        end
-    end
-
-    if #academy.rows == 0 then
-        textRow(tableWidget, "2. Trainee crew", "No retained trainees. Preview and approve recruitment first.", warningColor)
-    else
-        local options = {}
-        for _, rowData in ipairs(academy.rows) do
-            local rating = rowData.piloting and string.format("%.1f / 5", rowData.piloting / 3) or "UNKNOWN"
-            options[#options + 1] = { id = tostring(rowData.id), text = rowData.name .. " | PILOTING " .. rating .. " | " .. rowData.origin, icon = "", displayremoveoption = false }
-        end
-        local row = tableWidget:addRow(true)
-        row[1]:createText("2. Trainee crew", { color = neutralColor })
+        row[1]:createText("Trainee", { color = neutralColor })
         local dropdown = row[2]:setColSpan(3):createDropDown(options, { active = true, startOption = academy.selectedRecruitID, height = Helper.standardButtonHeight })
         row[2].handlers.onDropDownConfirmed = function(_, value)
             academy.selectedRecruitID = tostring(value or "")
-            academy.previewAssignReady = false
             academy.previewPair = nil
             rebuild(false)
         end
     end
 
-    recruit = selectedAcademyRecruit()
-    vacancy = selectedAcademyVacancy(vacancies)
-    local canTrain = recruit and recruit.valid and recruit.piloting and recruit.piloting < 15 and recruit.seminarCount > 0
+    local recruit = selectedAcademyRecruit(track)
+    local skill = recruit and (track == "PILOT" and recruit.piloting or recruit.boarding) or nil
+    local nextTier = skill and math.min(5, math.floor(skill / 3) + 1) or 1
+    local trainingOwned = recruit and (track == "PILOT" and recruit.seminarCount or menu.store.marine[nextTier]) or 0
+    local canTrain = recruit and recruit.valid and skill and skill < 15 and trainingOwned > 0 and menu.pendingActionKind == nil
     local crewRow = tableWidget:addRow(true)
-    local crewText = recruit and (recruit.name .. " | PILOTING " .. (recruit.piloting and string.format("%.1f / 5", recruit.piloting / 3) or "UNKNOWN") .. " | " .. recruit.seminar .. " x" .. tostring(recruit.seminarCount)) or "NO TRAINEE SELECTED"
+    local trainingName = track == "PILOT" and (recruit and recruit.seminar or "PILOT LESSON") or ("MARINE CREDIT - " .. tostring(nextTier) .. " STAR")
+    local crewText = recruit and (recruit.name .. " | " .. track .. " " .. (skill and string.format("%.1f / 5", skill / 3) or "UNKNOWN") .. " | " .. trainingName .. " x" .. tostring(trainingOwned)) or "NO " .. track .. " TRAINEE SELECTED"
     crewRow[1]:setColSpan(2):createText(crewText, { color = recruit and headingColor or warningColor })
     crewRow[3]:setColSpan(2):createButton({ active = canTrain == true, bgColor = canTrain and requiredActionBackground or availableActionBackground }):setText("TRAIN ONE SESSION", { halign = "center" })
     if canTrain == true then
         crewRow[3].handlers.onClick = function()
-            local current = selectedAcademyRecruit()
-            if not current or not current.valid or not current.piloting or current.piloting >= 15 or current.seminarCount <= 0 then
-                rejectLocal("TRAINING BLOCKED - SELECTED TRAINEE OR APPLICABLE SEMINAR IS NO LONGER AVAILABLE | NOTHING CHANGED")
+            local current = selectedAcademyRecruit(track)
+            if not current or not current.valid then
+                rejectLocal("TRAINING BLOCKED - SELECTED " .. track .. " TRAINEE IS NO LONGER AVAILABLE | NOTHING CHANGED")
                 return
             end
-            auditAction("ACADEMY_TRAIN", tostring(current.id), "TRAINING REQUEST SENT - ONE SEMINAR MAXIMUM - INVENTORY AND SKILL READBACK REQUIRED", "ACADEMY_TRAIN_PENDING")
+            auditAction("ACADEMY_TRAIN", tostring(current.id), track .. " TRAINING REQUEST SENT - ONE LESSON OR CREDIT MAXIMUM - SKILL READBACK REQUIRED", "ACADEMY_TRAIN_PENDING", track)
         end
     end
+    actionRow(tableWidget, "Training supplies", "OPEN ACADEMY STORE", function() menu.page = "store"; menu.activeTab = "store"; rebuild(true) end, true, headingColor)
 
-    section(tableWidget, "PREVIEW AND TRANSFER")
-    textRow(tableWidget, "Selected pair", recruit and vacancy and (recruit.name .. " -> " .. vacancy.name .. " [" .. vacancy.idcode .. "]") or "SELECT ONE DESTINATION SHIP AND ONE TRAINEE", recruit and vacancy and headingColor or warningColor)
-    actionRow(tableWidget, "Assignment", "PREVIEW SELECTED ASSIGNMENT", function()
-        local currentRecruit = selectedAcademyRecruit()
-        local currentVacancy = selectedAcademyVacancy(academy.vacancies)
-        if not currentRecruit or not currentRecruit.valid or not currentVacancy then
-            rejectLocal("ASSIGNMENT PREVIEW BLOCKED - SELECT ONE VALID TRAINEE AND ONE PROVEN CAPTAIN VACANCY | NOTHING CHANGED")
-            return
+    if track == "PILOT" then
+        section(tableWidget, "CAPTAIN ASSIGNMENT")
+        textRow(tableWidget, "Eligibility", "Any shared trainee may be assigned to a proven captain vacancy while Pilot focus is selected.", passColor)
+        local vacancy = selectedAcademyVacancy(academy.vacancies)
+        if #academy.vacancies == 0 then
+            textRow(tableWidget, "Destination", "No proven captain vacancy is available in the bounded scan.", warningColor)
+        else
+            local options = {}
+            for _, issue in ipairs(academy.vacancies) do options[#options + 1] = { id = issue.key, text = issue.name .. " [" .. issue.idcode .. "] - " .. issue.sector, icon = "", displayremoveoption = false } end
+            local row = tableWidget:addRow(true)
+            row[1]:createText("Destination", { color = neutralColor })
+            row[2]:setColSpan(3):createDropDown(options, { active = true, startOption = academy.selectedVacancyID, height = Helper.standardButtonHeight })
+            row[2].handlers.onDropDownConfirmed = function(_, value) academy.selectedVacancyID = tostring(value or ""); academy.previewPair = nil; rebuild(false) end
         end
-        local shipLuaID = componentLuaID(currentVacancy.component)
-        if not shipLuaID then
-            rejectLocal("ASSIGNMENT PREVIEW BLOCKED - SELECTED SHIP IDENTITY IS NO LONGER VALID | NOTHING CHANGED")
-            return
+        vacancy = selectedAcademyVacancy(academy.vacancies)
+        textRow(tableWidget, "Selected pair", recruit and vacancy and (recruit.name .. " -> " .. vacancy.name .. " [" .. vacancy.idcode .. "]") or "SELECT ONE PILOT AND ONE CAPTAIN VACANCY", recruit and vacancy and headingColor or warningColor)
+        actionRow(tableWidget, "Assignment", "PREVIEW CAPTAIN ASSIGNMENT", function()
+            local currentRecruit, currentVacancy = selectedAcademyRecruit("PILOT"), selectedAcademyVacancy(academy.vacancies)
+            local shipLuaID = currentVacancy and componentLuaID(currentVacancy.component) or nil
+            if not currentRecruit or not currentRecruit.valid or not shipLuaID then rejectLocal("CAPTAIN PREVIEW BLOCKED - SELECT ONE VALID PILOT AND ONE PROVEN VACANCY | NOTHING CHANGED"); return end
+            academy.previewPair = tostring(currentRecruit.id) .. ":" .. currentVacancy.key
+            auditAction("ACADEMY_PREVIEW_ASSIGN", tostring(currentRecruit.id), "CAPTAIN ASSIGNMENT PREVIEW REQUESTED - NOTHING CHANGED", "ACADEMY_ASSIGN_PREVIEW_PENDING", shipLuaID)
+        end, recruit and recruit.valid and vacancy ~= nil and menu.pendingActionKind == nil, headingColor)
+        local pair = recruit and vacancy and (tostring(recruit.id) .. ":" .. vacancy.key) or nil
+        actionRow(tableWidget, "Assignment", "TRANSFER PILOT TO CAPTAIN POST", function()
+            local currentRecruit, currentVacancy = selectedAcademyRecruit("PILOT"), selectedAcademyVacancy(academy.vacancies)
+            local currentPair = currentRecruit and currentVacancy and (tostring(currentRecruit.id) .. ":" .. currentVacancy.key) or nil
+            if not currentRecruit or currentPair ~= academy.previewPair or menu.plan.lastState ~= "ACADEMY_ASSIGN_READY" then rejectLocal("CAPTAIN TRANSFER BLOCKED - THE EXACT PAIR MUST PASS A FRESH PREVIEW | NOTHING CHANGED"); return end
+            local shipLuaID = componentLuaID(currentVacancy.component)
+            if not shipLuaID then rejectLocal("CAPTAIN TRANSFER BLOCKED - DESTINATION IDENTITY IS NO LONGER VALID | NOTHING CHANGED"); return end
+            auditAction("ACADEMY_ASSIGN", tostring(currentRecruit.id), "CAPTAIN TRANSFER REQUEST SENT - EXACT PILOT READBACK REQUIRED", "ACADEMY_ASSIGN_PENDING", shipLuaID)
+            academy.previewPair = nil
+        end, pair and academy.previewPair == pair and menu.plan.lastState == "ACADEMY_ASSIGN_READY" and menu.pendingActionKind == nil, warningColor)
+        actionRow(tableWidget, "Captain auto-fill", "PREVIEW RECRUIT / TRAIN / ASSIGN UP TO 25", function()
+            academy.previewPair = nil
+            academy.previewBulkFill = true
+            auditAction("ACADEMY_PREVIEW_BULK_FILL", "BOUND_25", "CAPTAIN AUTO-FILL PREVIEW REQUESTED - NOTHING CHANGED", "ACADEMY_BULK_PREVIEW_PENDING")
+        end, #academy.vacancies > 0 and menu.pendingActionKind == nil, headingColor)
+        actionRow(tableWidget, "Captain auto-fill", "APPROVE RECRUIT / TRAIN / ASSIGN", function()
+            academy.previewPair = nil
+            auditAction("ACADEMY_BULK_ASSIGN", "SKILL_DESCENDING_BOUND_25", "CAPTAIN AUTO-FILL APPROVED - RECRUITMENT, TRAINING, AND NATIVE CAPTAIN READBACK REQUIRED", "ACADEMY_BULK_PENDING")
+            academy.previewBulkFill = false
+        end, academy.previewBulkFill and menu.plan.lastState == "ACADEMY_BULK_FILL_READY" and #academy.vacancies > 0 and menu.pendingActionKind == nil, warningColor)
+    else
+        section(tableWidget, "MARINE ASSIGNMENT")
+        textRow(tableWidget, "Eligible destinations", "Any player-owned, non-mission ship with free personnel capacity. Each destination shows its FOC relationship, crew occupancy, and current Marine count.", passColor)
+        local target = selectedMarineTarget(academy.marineTargets)
+        if #academy.marineTargets == 0 then
+            textRow(tableWidget, "Destination", "No eligible player ship currently has free personnel capacity.", warningColor)
+        else
+            local options = {}
+            for _, ship in ipairs(academy.marineTargets) do options[#options + 1] = { id = ship.key, text = ship.relationship .. " | " .. ship.name .. " [" .. ship.idcode .. "] | CREW " .. ship.people .. "/" .. ship.capacity .. " | MARINES " .. ship.marines, icon = "", displayremoveoption = false } end
+            local row = tableWidget:addRow(true)
+            row[1]:createText("Destination", { color = neutralColor })
+            row[2]:setColSpan(3):createDropDown(options, { active = true, startOption = academy.selectedMarineTargetID, height = Helper.standardButtonHeight })
+            row[2].handlers.onDropDownConfirmed = function(_, value) academy.selectedMarineTargetID = tostring(value or ""); academy.previewPair = nil; rebuild(false) end
         end
-        academy.previewPair = tostring(currentRecruit.id) .. ":" .. currentVacancy.key
-        auditAction("ACADEMY_PREVIEW_ASSIGN", tostring(currentRecruit.id), "ASSIGNMENT PREVIEW REQUESTED - NO PERSONNEL CHANGED", "ACADEMY_ASSIGN_PREVIEW_PENDING", shipLuaID)
-    end, recruit and recruit.valid and vacancy ~= nil, headingColor)
-    local pair = recruit and vacancy and (tostring(recruit.id) .. ":" .. vacancy.key) or nil
-    actionRow(tableWidget, "Assignment", "TRANSFER SELECTED CREW TO SELECTED SHIP", function()
-        local currentRecruit = selectedAcademyRecruit()
-        local currentVacancy = selectedAcademyVacancy(academy.vacancies)
-        local currentPair = currentRecruit and currentVacancy and (tostring(currentRecruit.id) .. ":" .. currentVacancy.key) or nil
-        if not currentRecruit or not currentRecruit.valid or not currentVacancy or currentPair ~= academy.previewPair or menu.plan.lastState ~= "ACADEMY_ASSIGN_READY" then
-            rejectLocal("TRANSFER BLOCKED - THE SELECTED CREW-TO-SHIP PAIR MUST PASS A FRESH PREVIEW | NOTHING CHANGED")
-            return
-        end
-        local shipLuaID = componentLuaID(currentVacancy.component)
-        if not shipLuaID then
-            rejectLocal("TRANSFER BLOCKED - SELECTED SHIP IDENTITY IS NO LONGER VALID | NOTHING CHANGED")
-            return
-        end
-        auditAction("ACADEMY_ASSIGN", tostring(currentRecruit.id), "CAPTAIN TRANSFER REQUEST SENT - EXACT PILOT READBACK REQUIRED", "ACADEMY_ASSIGN_PENDING", shipLuaID)
-        academy.previewPair = nil
-    end, pair and academy.previewPair == pair and menu.plan.lastState == "ACADEMY_ASSIGN_READY", warningColor)
+        target = selectedMarineTarget(academy.marineTargets)
+        textRow(tableWidget, "Ship role", target and target.relationship or "NO ELIGIBLE DESTINATION SELECTED", target and headingColor or warningColor)
+        textRow(tableWidget, "Selected pair", recruit and target and (recruit.name .. " -> " .. target.name .. " [" .. target.idcode .. "]") or "SELECT ONE MARINE AND ONE ELIGIBLE DESTINATION", recruit and target and headingColor or warningColor)
+        actionRow(tableWidget, "Assignment", "PREVIEW MARINE ASSIGNMENT", function()
+            local currentRecruit, currentTarget = selectedAcademyRecruit("MARINE"), selectedMarineTarget(academy.marineTargets)
+            local shipLuaID = currentTarget and componentLuaID(currentTarget.component) or nil
+            if not currentRecruit or not currentRecruit.valid or not shipLuaID then rejectLocal("MARINE PREVIEW BLOCKED - SELECT ONE VALID MARINE AND ONE ELIGIBLE DESTINATION | NOTHING CHANGED"); return end
+            academy.previewPair = tostring(currentRecruit.id) .. ":" .. currentTarget.key
+            auditAction("ACADEMY_PREVIEW_MARINE_ASSIGN", tostring(currentRecruit.id), "MARINE ASSIGNMENT PREVIEW REQUESTED - NOTHING CHANGED", "ACADEMY_MARINE_PREVIEW_PENDING", shipLuaID)
+        end, recruit and recruit.valid and target ~= nil and menu.pendingActionKind == nil, headingColor)
+        local pair = recruit and target and (tostring(recruit.id) .. ":" .. target.key) or nil
+        actionRow(tableWidget, "Assignment", "TRANSFER MARINE TO SELECTED SHIP", function()
+            local currentRecruit, currentTarget = selectedAcademyRecruit("MARINE"), selectedMarineTarget(academy.marineTargets)
+            local currentPair = currentRecruit and currentTarget and (tostring(currentRecruit.id) .. ":" .. currentTarget.key) or nil
+            if not currentRecruit or currentPair ~= academy.previewPair or menu.plan.lastState ~= "ACADEMY_MARINE_ASSIGN_READY" then rejectLocal("MARINE TRANSFER BLOCKED - THE EXACT PAIR MUST PASS A FRESH PREVIEW | NOTHING CHANGED"); return end
+            local shipLuaID = componentLuaID(currentTarget.component)
+            if not shipLuaID then rejectLocal("MARINE TRANSFER BLOCKED - DESTINATION IDENTITY IS NO LONGER VALID | NOTHING CHANGED"); return end
+            auditAction("ACADEMY_MARINE_ASSIGN", tostring(currentRecruit.id), "MARINE TRANSFER REQUEST SENT - ROLE AND CREW READBACK REQUIRED", "ACADEMY_MARINE_ASSIGN_PENDING", shipLuaID)
+            academy.previewPair = nil
+        end, pair and academy.previewPair == pair and menu.plan.lastState == "ACADEMY_MARINE_ASSIGN_READY" and menu.pendingActionKind == nil, warningColor)
+    end
     textRow(tableWidget, "Last result", menu.plan.lastResult, needsAction(menu.plan.lastResult) and warningColor or passColor)
 end
 
-local function previewPage(tableWidget, title, lines)
-    section(tableWidget, title)
-    for _, line in ipairs(lines) do textRow(tableWidget, line[1], line[2], line[3]) end
+local function formatCredits(value)
+    local text = tostring(math.floor(tonumber(value) or 0))
+    local formatted = text
+    while true do
+        local nextText, count = formatted:gsub("^(%-?%d+)(%d%d%d)", "%1,%2")
+        formatted = nextText
+        if count == 0 then break end
+    end
+    return formatted .. " Cr"
 end
 
-local function doctrinePage(tableWidget)
-    local selected = menu.sample.fleets[menu.selectedFleet]
-    local orders = selected and ordersForFleet(selected) or nil
-    section(tableWidget, "HOME, COVERAGE, AND PATROL")
-    textRow(tableWidget, "Stable fleet", selected and (selected.commander.name .. " [" .. selected.commander.idcode .. "]") or "SELECT A FLEET TO CONTINUE", selected and headingColor or warningColor)
-    local homeSector = selected and homeSectorForFleet(selected) or nil
-    actionRow(tableWidget, "Home sector", homeSector and homeSector.text or "CHOOSE ON FLEETS TAB", function() menu.page = "fleets"; menu.phase.fleets = "registry"; rebuild(true) end, selected ~= nil, headingColor)
-    actionRow(tableWidget, "Coverage range", orders and orders.coverage or "BLOCKED - SELECT A FLEET", function() orders.coverage = cycle(orders.coverage, coverageRanges); markFleetOrdersChanged(fleetKey(selected), orders); rebuild(false) end, selected ~= nil, headingColor)
-    textRow(tableWidget, "Sector controls", "Included sectors: DRAFT | Excluded sectors: DRAFT | Owned stations prioritized: YES | Return point: HOME ANCHOR", neutralColor)
-    textRow(tableWidget, "Route scoring", "Gate distance, owned assets, traffic, distress history, threat, and available resupply. Missing map or threat evidence blocks automatic routing.", passColor)
-    textRow(tableWidget, "Chase limit", "Coverage boundary; pursuit outside coverage: DISABLED", warningColor)
-    textRow(tableWidget, "Protections", "Player control, manual orders, mission/story ships, emergency actions, commander changes, and never-touch locks block mutation.", passColor)
-    actionRow(tableWidget, "Doctrine", "PREVIEW EFFECTIVE PATROL PLAN", function() previewPatrolPlan(selected, orders, homeSector) end, selected ~= nil, headingColor)
-    textRow(tableWidget, "Preview result", menu.previews.patrol or "Press PREVIEW EFFECTIVE PATROL PLAN to build a non-mutating patrol summary.", menu.previews.patrol and (menu.previews.patrol:find("BLOCKED") and warningColor or passColor) or warningColor)
-    actionRow(tableWidget, "Doctrine profile", "CHOOSE A FLEET TO COPY OR EDIT", function() menu.page = "fleets"; menu.activeTab = "fleets"; rebuild(true) end, true, warningColor)
-    if not selected or not homeSector or (menu.previews.patrol and menu.previews.patrol:find("BLOCKED")) then
-        actionRequired(tableWidget,
-            "FOC did not build an approvable patrol plan.",
-            not selected and "No fleet is selected." or "This fleet does not have a confirmed Home point.",
-            "Open Fleets, choose the fleet, set its Home point on the map, save the draft, then return here and preview again.",
-            "fleets", "OPEN FLEETS")
+local function academyStorePage(tableWidget)
+    section(tableWidget, "ACADEMY STORE")
+    textRow(tableWidget, "Player balance", formatCredits(menu.store.balance), headingColor)
+    textRow(tableWidget, "Pricing", "1-star 10,000 | 2-star 20,000 | 3-star 30,000 | 4-star 40,000 | 5-star 50,000 Cr", neutralColor)
+    textRow(tableWidget, "Purchase policy", "All purchases are final. FOC verifies payment and delivery, but confirmed payments are never refunded.", warningColor)
+    local function storeSection(label, kind, owned)
+        section(tableWidget, label)
+        for tier = 1, 5 do
+            local price = tier * 10000
+            local row = tableWidget:addRow(true)
+            row[1]:createText(tostring(tier) .. " STAR", { color = headingColor })
+            row[2]:createText("OWNED " .. tostring(owned[tier] or 0), { color = neutralColor })
+            row[3]:createText(formatCredits(price), { color = menu.store.balance >= price and passColor or warningColor })
+            row[4]:createButton({ active = menu.store.balance >= price and menu.pendingActionKind == nil, bgColor = menu.store.balance >= price and normalActionBackground or availableActionBackground }):setText("BUY 1", { halign = "center" })
+            if menu.store.balance >= price and menu.pendingActionKind == nil then
+                row[4].handlers.onClick = function() auditAction("ACADEMY_STORE_BUY", kind, kind .. " " .. tier .. "-STAR PURCHASE REQUESTED - PAYMENT AND DELIVERY READBACK REQUIRED", "ACADEMY_STORE_PENDING", tier) end
+            end
+        end
+        actionRow(tableWidget, "Bundle", "BUY ALL FIVE " .. label .. " - " .. formatCredits(150000), function()
+            auditAction("ACADEMY_STORE_BUY_ALL", kind, kind .. " FIVE-TIER BUNDLE REQUESTED - COMPLETE DELIVERY READBACK REQUIRED", "ACADEMY_STORE_PENDING")
+        end, menu.store.balance >= 150000 and menu.pendingActionKind == nil, warningColor)
     end
+    storeSection("PILOT LESSONS", "PILOT", menu.store.pilot)
+    storeSection("MARINE CREDITS", "MARINE", menu.store.marine)
+    section(tableWidget, "COMPLETE TRAINING BUNDLE")
+    textRow(tableWidget, "Contents", "One Pilot Lesson and one Marine Credit at every tier: 10 training items total.", headingColor)
+    actionRow(tableWidget, "Everything", "BUY ALL TRAINING - " .. formatCredits(300000), function()
+        auditAction("ACADEMY_STORE_BUY_ALL", "ALL", "COMPLETE TEN-ITEM TRAINING BUNDLE REQUESTED - COMPLETE DELIVERY READBACK REQUIRED", "ACADEMY_STORE_PENDING")
+    end, menu.store.balance >= 300000 and menu.pendingActionKind == nil, warningColor)
+    textRow(tableWidget, "Last result", menu.plan.lastResult, needsAction(menu.plan.lastResult) and warningColor or passColor)
 end
 
 local function responsePage(tableWidget)
     local selected = menu.sample.fleets[menu.selectedFleet]
     local orders = selected and ordersForFleet(selected) or nil
     section(tableWidget, "FLEET RESPONSE RULES")
-    actionRow(tableWidget, "Distress scope", orders and orders.distress or "BLOCKED - SELECT A FLEET", function() orders.distress = cycle(orders.distress, distressScopes); markFleetOrdersChanged(fleetKey(selected), orders); rebuild(false) end, selected ~= nil, headingColor)
-    textRow(tableWidget, "Ownership", "My ships: YES | My stations: YES | Allied ships: " .. (orders and orders.distress == "PLAYER AND ALLIED" and "YES" or "NO") .. " | Friendly/neutral: " .. (orders and orders.distress == "FRIENDLY OR NEUTRAL" and "YES" or "NO"), neutralColor)
-    textRow(tableWidget, "Eligibility", "Minimum severity: HIGH | Maximum threat: MATCHED | Minimum readiness: READY | Incident age: 120 seconds", neutralColor)
-    textRow(tableWidget, "Dispatch bounds", "Maximum fleets per incident: 1 | Reinforcements: NO | Pursuit outside coverage: NO | one mutation per cycle", passColor)
-    textRow(tableWidget, "Abort conditions", "Player control, manual order, mission/story protection, readiness loss, unknown route/threat, home loss, stale incident, or coverage exit.", passColor)
-    textRow(tableWidget, "Maintenance", "Repair below 80% hull | resupply evidence required | return home and verify back-on-post", neutralColor)
+    textRow(tableWidget, "Distress ownership", "PLAYER-OWNED SHIPS AND STATIONS ONLY", passColor)
+    textRow(tableWidget, "Eligibility", orders and ("Urgency " .. tostring(orders.distressUrgency) .. "+ | Ships at/below " .. tostring(orders.shipDamage) .. "% hull | Stations at/below " .. tostring(orders.stationDamage) .. "% hull | Range " .. orders.coverage .. " | Incident age 120 seconds") or "BLOCKED - SELECT A FLEET", neutralColor)
+    textRow(tableWidget, "Dispatch bounds", "Closest eligible fleet: 1 | Named orders per incident: 1 | Reinforcements: NO | Whole-fleet ship cap: " .. tostring(menu.safety.responseCap), passColor)
+    textRow(tableWidget, "Abort conditions", "Player control, mission/story protection, missing captain, non-combat without override, critical non-cancelable order, missing Home, stale incident, class disabled, threshold failure, or response-range failure.", passColor)
+    actionRow(tableWidget, "Maintenance", "OPEN FLEET REPAIR / REPLACE / REBUILD", function() menu.page = "fleets"; menu.activeTab = "fleets"; menu.fleetMode = "maintenance"; requestMaintenanceSnapshot(selected) end, selected ~= nil, headingColor)
     actionRow(tableWidget, "Current orders", orders and orders.manualOverride and "PRESERVE CURRENT ORDERS - FOC BLOCKED" or "ALLOW FOC TO CANCEL / REPLACE ELIGIBLE ORDERS", function() orders.manualOverride = not orders.manualOverride; markFleetOrdersChanged(fleetKey(selected), orders); rebuild(false) end, selected ~= nil, warningColor)
     section(tableWidget, "DISPATCH DECISION")
-    textRow(tableWidget, "Selected fleet", selected and selected.commander.name or "NONE", selected and headingColor or warningColor)
-    textRow(tableWidget, "Decision evidence", "Record distressed identity/source/location/age/ownership, eligibility, selected fleet or refusal, requested action, native readback, blocker, and next state.", passColor)
-    actionRow(tableWidget, "Response", "PREVIEW DISPATCH", function() previewDispatchPlan(selected, orders) end, selected ~= nil, headingColor)
-    textRow(tableWidget, "Preview result", menu.previews.dispatch or "Press PREVIEW DISPATCH to evaluate the selected fleet against current incident evidence.", menu.previews.dispatch and (menu.previews.dispatch:find("BLOCKED") and warningColor or passColor) or warningColor)
-    actionRow(tableWidget, "Response", "APPROVE ONE DISPATCH", function()
-        if not menu.previews.dispatch or menu.previews.dispatch:find("BLOCKED") then
-            auditAction("APPROVE_DISPATCH", selected and selected.commander.idcode or "NONE", "DISPATCH NOT SENT - THERE IS NO CURRENT APPROVABLE INCIDENT PREVIEW. NOTHING CHANGED.", "ACTION_REQUIRED_DISPATCH")
-        elseif not selected or selected.missionProtected or (selected.commander.primarypurpose ~= "fight" and not orders.nonCombatOverride) then
-            auditAction("APPROVE_DISPATCH", selected and selected.commander.idcode or "NONE", "DISPATCH NOT SENT - MISSION PROTECTION OR NON-COMBAT OVERRIDE BLOCKED THIS FLEET. NOTHING CHANGED.", "ACTION_REQUIRED_DISPATCH")
-        elseif selected.commander.playerOccupied or selected.status ~= "READY" then
-            auditAction("APPROVE_DISPATCH", selected and selected.commander.idcode or "NONE", "DISPATCH NOT SENT - THE SELECTED FLEET IS NOT READY OR IS PLAYER-CONTROLLED. NOTHING CHANGED.", "ACTION_REQUIRED_DISPATCH")
-        else
-            auditAction("APPROVE_DISPATCH", selected.commander.idcode, "DISPATCH REQUEST SENT - WAITING FOR NATIVE INCIDENT/ORDER READBACK", "DISPATCH_PENDING")
-        end
-    end, selected ~= nil, warningColor)
-    if menu.plan.lastState == "ACTION_REQUIRED_DISPATCH" or (menu.previews.dispatch and menu.previews.dispatch:find("BLOCKED")) then
+    textRow(tableWidget, "Selection", "FOC re-resolves every saved reaction fleet at approval, filters locks and the " .. tostring(menu.safety.responseCap) .. "-ship cap, then chooses the lowest current gated distance. Saved list order and the currently viewed fleet do not decide.", headingColor)
+    textRow(tableWidget, "Decision evidence", "Record distressed identity/source/location/age/ownership, every guard, closest eligible fleet or refusal, exact named order attempt, native readback, persistent lock, and resolution.", passColor)
+    actionRow(tableWidget, "Response", "APPROVE ONE CLOSEST-ELIGIBLE DISPATCH", function()
+        auditAction("APPROVE_DISPATCH", "GLOBAL CLOSEST", "EXCLUSIVE DISPATCH REQUEST SENT - ONE CLOSEST ELIGIBLE FLEET AND ONE NAMED ORDER MAXIMUM", "DISPATCH_PENDING")
+    end, menu.pendingActionKind == nil, warningColor)
+    if menu.plan.lastState == "ACTION_REQUIRED_DISPATCH" or menu.plan.lastState == "BLOCKED" then
         actionRequired(tableWidget,
-            "FOC did not dispatch the selected fleet.",
-            "There is no fresh, eligible distress incident and verified route for this fleet.",
-            "Open Fleets, confirm the fleet Home and distress settings, save its draft, then return when an active incident appears and preview again.",
+            "FOC did not dispatch a fleet.",
+            "There is no fresh unlocked incident or no saved fleet passed the current-distance, response-range, damage, urgency, safety, lock, and ship-cap guards.",
+            "Open Fleets, confirm each fleet Home and distress settings, save its draft, then return while an active incident exists.",
             "fleets", "OPEN FLEETS")
     end
 end
@@ -1661,25 +2269,50 @@ local function settingsPage(tableWidget)
     textRow(tableWidget, "Replacement boundary", "Destroyed-member replacement may create a recommendation only. No purchase, construction, credit spend, or staffing guess is authorized.", passColor)
     textRow(tableWidget, "Rebalance threshold", "25% minimum modeled benefit; 30 second cooldown; duplicate suppression; bounded backoff; maximum one native mutation per cycle.", neutralColor)
     section(tableWidget, "HARD PERFORMANCE AND SAFETY LIMITS")
-    textRow(tableWidget, "Ship sample cap", tostring(MAX_SHIPS_PER_SAMPLE), neutralColor)
-    textRow(tableWidget, "Fleet display cap", tostring(MAX_FLEETS_DISPLAYED), neutralColor)
-    textRow(tableWidget, "Member cap per fleet", "100", neutralColor)
+    textRow(tableWidget, "Fleet source", "Authoritative MD structural discovery - all eligible commanders and all subordinates", passColor)
+    textRow(tableWidget, "Fleet registry", "All authoritative eligible rows; paged 16 at a time", neutralColor)
+    textRow(tableWidget, "Fleet members", "All living non-unit subordinates supplied by MD", neutralColor)
     textRow(tableWidget, "History limit", tostring(HISTORY_LIMIT), neutralColor)
+    textRow(tableWidget, "Live activity limit", tostring(LIVE_ACTIVITY_LIMIT) .. " retained | " .. tostring(LIVE_ACTIVITY_VISIBLE) .. " shown", neutralColor)
     textRow(tableWidget, "Scheduler", "No per-frame scan or mutation. Open/refresh inventory is bounded; automation requests are cooldown guarded.", passColor)
     textRow(tableWidget, "Runtime status", "RUNTIME ACCEPTANCE REQUIRED", warningColor)
 end
 
 local function activityPage(tableWidget)
-    section(tableWidget, "BOUNDED SESSION ACTIVITY")
-    local first, last = addPager(tableWidget, "activity.history", #menu.history, { fixedRows = 8, rowUnits = 3, contentPixels = menu.listContentHeight, maximum = 8 })
-    for index = first, last do
-        local sample = menu.history[index]
-        if sample then
-        local row = tableWidget:addRow(false)
-        row[1]:createText("SAMPLE " .. tostring(index))
-        row[2]:createText(sample.reason)
-        row[3]:createText("Ships: " .. tostring(sample.shipsExamined))
-        row[4]:createText("Fleets: " .. tostring(sample.fleetCount) .. " | Missing captains: " .. tostring(sample.missingCaptains) .. " | State: " .. tostring(sample.state or "SAMPLED") .. "\n" .. safeText(sample.result, "No additional result recorded."), { wordwrap = true, color = needsAction(sample.result) and warningColor or passColor })
+    buttonPairRow(tableWidget, "LIVE ACTIVITY", function() menu.activityView = "live"; rebuild(false) end,
+        "SESSION HISTORY", function() menu.activityView = "history"; rebuild(false) end,
+        menu.activityView == "history" and passColor or headingColor, true, true)
+    if menu.activityView == "live" then
+        section(tableWidget, "LIVE ACTIVITY - NEWEST FIRST")
+        textRow(tableWidget, "Boundary", "Latest " .. tostring(LIVE_ACTIVITY_VISIBLE) .. " shown | " .. tostring(LIVE_ACTIVITY_LIMIT) .. " retained | oldest entries roll off automatically", passColor)
+        if #menu.liveActivity == 0 then
+            textRow(tableWidget, "Status", "No FOC activity has been recorded yet. Distress detection, responses, patrol results, and completed actions appear here immediately.", warningColor)
+        end
+        for index = 1, math.min(#menu.liveActivity, LIVE_ACTIVITY_VISIBLE) do
+            local entry = menu.liveActivity[index]
+            local red = entry.severity == "RED_DAMAGE"
+            local yellow = entry.severity == "YELLOW_DISTRESS"
+            local activityColor = red and criticalColor or yellow and warningColor or headingColor
+            local stateColor = red and criticalColor or yellow and warningColor or (needsAction(entry.state) and warningColor or passColor)
+            local detailColor = red and criticalColor or yellow and warningColor or (needsAction(entry.detail) and warningColor or passColor)
+            local row = tableWidget:addRow(false)
+            row[1]:createText(formatGameTime(entry.time) .. "\nACTIVITY " .. tostring(entry.id), { color = activityColor })
+            row[2]:createText(entry.kind .. " | " .. entry.state, { color = stateColor })
+            row[3]:createText(entry.subject, { wordwrap = true, color = red and criticalColor or yellow and warningColor or nil })
+            row[4]:createText(entry.detail, { wordwrap = true, color = detailColor })
+        end
+    else
+        section(tableWidget, "BOUNDED SESSION HISTORY")
+        local first, last = addPager(tableWidget, "activity.history", #menu.history, { fixedRows = 8, rowUnits = 3, contentPixels = menu.listContentHeight, maximum = 8 })
+        for index = first, last do
+            local entry = menu.history[index]
+            if entry then
+            local row = tableWidget:addRow(false)
+            row[1]:createText("ACTIVITY " .. tostring(index))
+            row[2]:createText(entry.reason)
+            row[3]:createText("Session time: " .. string.format("%.1f", tonumber(entry.time) or 0))
+            row[4]:createText("Fleets: " .. tostring(entry.fleetCount) .. " | Missing captains: " .. tostring(entry.missingCaptains) .. " | State: " .. tostring(entry.state or "RECORDED") .. "\n" .. safeText(entry.result, "No additional result recorded."), { wordwrap = true, color = needsAction(entry.result) and warningColor or passColor })
+            end
         end
     end
 end
@@ -1718,7 +2351,7 @@ function menu.create()
         menu.fleetTable = fleetTable
         menu.mainTable = ordersTable
         fleetSelectorPane(fleetTable)
-        fleetOrdersPane(ordersTable)
+        if menu.fleetMode == "maintenance" then fleetMaintenancePane(ordersTable) elseif menu.fleetMode == "thresholds" then fleetSafetyPane(ordersTable) else fleetOrdersPane(ordersTable) end
         if menu.restoreTopRow then pcall(ordersTable.setTopRow, ordersTable, menu.restoreTopRow) end
         menu.restoreTopRow = nil
         menu.frame:display()
@@ -1734,7 +2367,7 @@ function menu.create()
     if menu.page == "command" then commandPage(tableWidget)
     elseif menu.page == "readiness" then readinessPage(tableWidget)
     elseif menu.page == "academy" then academyPage(tableWidget)
-    elseif menu.page == "doctrine" then doctrinePage(tableWidget)
+    elseif menu.page == "store" then academyStorePage(tableWidget)
     elseif menu.page == "response" then responsePage(tableWidget)
     elseif menu.page == "activity" then activityPage(tableWidget)
     else settingsPage(tableWidget) end
@@ -1759,6 +2392,7 @@ function menu.onShowMenu()
     if menu.param[6] == "PREVIEW PLAN" or menu.param[6] == "APPLY APPROVED PLAN" or menu.param[6] == "FULL AUTOMATION" then menu.plan.authority = menu.param[6] end
     if menu.param[7] and tostring(menu.param[7]) ~= "" then menu.plan.lastResult = tostring(menu.param[7]) end
     if menu.param[8] and tostring(menu.param[8]) ~= "" then menu.plan.lastState = tostring(menu.param[8]) end
+    if menu.plan.lastState == "ACADEMY_MARINE_TRANSFER_PENDING" then menu.pendingActionKind = "ACADEMY_MARINE_ASSIGN" end
     if menu.plan.lastState == "STOPPED" then menu.plan.status = "STOPPED" end
     local authoritativeDraftRows = type(menu.param[9]) == "table"
     if authoritativeDraftRows then
@@ -1768,17 +2402,31 @@ function menu.onShowMenu()
         menu.pendingDraftSaves = {}
     end
     local restoredDrafts = restorePersistentDrafts(menu.param[9])
-    loadAcademyRows(menu.param[11])
-    loadProtectedShipIDs(menu.param[12])
-    loadVacancyRows(menu.param[13])
+    if type(menu.param[11]) == "table" then loadAcademyRows(menu.param[11]) end
+    if type(menu.param[12]) == "table" then loadProtectedShipIDs(menu.param[12]) end
+    if type(menu.param[13]) == "table" then loadVacancyRows(menu.param[13]) end
+    if type(menu.param[14]) == "table" then loadMarineTargetRows(menu.param[14]) end
+    if type(menu.param[15]) == "table" then loadStoreData(menu.param[15]) end
+    if type(menu.param[16]) == "table" then loadLiveActivityRows(menu.param[16]) end
+    if type(menu.param[17]) == "table" then
+        local thresholds = menu.param[17]
+        menu.safety.reactionRepair = tonumber(thresholds[2]) or 100
+        menu.safety.playerRepair = tonumber(thresholds[3]) or 100
+        menu.safety.responseCap = tonumber(thresholds[4]) or 100
+        menu.safety.dirty = false
+    end
+    if type(menu.param[18]) == "table" then loadStructuralFleetRows(menu.param[18]) end
+    if type(menu.param[19]) == "table" then loadStoryOverrideIDs(menu.param[19]) end
+    if type(menu.param[20]) == "table" then loadStoryAnsweredIDs(menu.param[20]) end
     if authoritativeDraftRows and restoredDrafts > 0 then
         menu.notice = "RESTORED " .. tostring(restoredDrafts) .. " SAVED FLEET DRAFT(S) FROM THE GAME SAVE"
-        DebugError("[FOC][B020][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
+        DebugError("[FOC][B035][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
     elseif authoritativeDraftRows then
-        DebugError("[FOC][B020][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
+        DebugError("[FOC][B035][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
     end
     if menu.pendingHomeSelection then
         menu.pendingHomeSelection = nil
+        menu.homeReturnMetadata = nil
         menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP CLOSED WITHOUT CHOOSING SET AS FOC HOME POINT"
     end
     menu.page = menu.page or "command"
@@ -1814,7 +2462,7 @@ local function init()
     if Helper and Helper.registerMenu then
         Helper.registerMenu(menu)
     else
-        DebugError("[FOC][B020][LUA_ERROR] Helper.registerMenu unavailable")
+        DebugError("[FOC][B035][LUA_ERROR] Helper.registerMenu unavailable")
     end
     RegisterEvent(menu.name .. ".draft.key", draftKeyReceived)
     RegisterEvent(menu.name .. ".draft.result", draftResultReceived)
@@ -1823,6 +2471,47 @@ local function init()
     RegisterEvent(menu.name .. ".action.result", actionResultReceived)
     RegisterEvent(menu.name .. ".action.state", actionStateReceived)
     RegisterEvent(menu.name .. ".action.complete", actionComplete)
+    RegisterEvent(menu.name .. ".activity.id", liveActivityID)
+    RegisterEvent(menu.name .. ".activity.time", liveActivityTime)
+    RegisterEvent(menu.name .. ".activity.kind", liveActivityKind)
+    RegisterEvent(menu.name .. ".activity.state", liveActivityState)
+    RegisterEvent(menu.name .. ".activity.subject", liveActivitySubject)
+    RegisterEvent(menu.name .. ".activity.detail", liveActivityDetail)
+    RegisterEvent(menu.name .. ".activity.severity", liveActivitySeverity)
+    RegisterEvent(menu.name .. ".activity.row.commit", liveActivityCommit)
+    RegisterEvent(menu.name .. ".structural.snapshot.begin", menu.structuralSnapshotBegin)
+    RegisterEvent(menu.name .. ".structural.snapshot.row.begin", menu.structuralSnapshotRowBegin)
+    RegisterEvent(menu.name .. ".structural.snapshot.commander", menu.structuralSnapshotCommander)
+    RegisterEvent(menu.name .. ".structural.snapshot.key", menu.structuralSnapshotKey)
+    RegisterEvent(menu.name .. ".structural.snapshot.label", menu.structuralSnapshotLabel)
+    RegisterEvent(menu.name .. ".structural.snapshot.member", menu.structuralSnapshotMember)
+    RegisterEvent(menu.name .. ".structural.snapshot.row.commit", menu.structuralSnapshotRowCommit)
+    RegisterEvent(menu.name .. ".structural.snapshot.complete", menu.structuralSnapshotComplete)
+    RegisterEvent(menu.name .. ".maintenance.snapshot.begin", menu.maintenanceSnapshotBegin)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.idcode", menu.maintenanceRepairRowID)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.name", menu.maintenanceRepairRowName)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.hull", menu.maintenanceRepairRowHull)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.scope", menu.maintenanceRepairRowScope)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.fleet", menu.maintenanceRepairRowFleet)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.threshold", menu.maintenanceRepairRowThreshold)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.protected", menu.maintenanceRepairRowProtected)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.playercontrolled", menu.maintenanceRepairRowPlayerControlled)
+    RegisterEvent(menu.name .. ".maintenance.repairrow.commit", menu.maintenanceRepairRowCommit)
+    for _, field in ipairs({ "commander", "fleet", "status" }) do
+        local capturedField = field
+        RegisterEvent(menu.name .. ".maintenance.meta." .. field, function(_, value) menu.maintenanceMetaValue(capturedField, value) end)
+    end
+    for _, field in ipairs({ "fleetunit", "index", "name", "state", "signature", "detail", "ready" }) do
+        local capturedField = field
+        RegisterEvent(menu.name .. ".maintenance.lost." .. field, function(_, value) menu.maintenanceLostValue(capturedField, value) end)
+    end
+    RegisterEvent(menu.name .. ".maintenance.lost.commit", menu.maintenanceLostCommit)
+    RegisterEvent(menu.name .. ".maintenance.snapshot.complete", menu.maintenanceSnapshotComplete)
+    RegisterEvent(menu.name .. ".maintenance.repair.ship", function(_, value) menu.maintenanceRepairOpenValue("ship", value) end)
+    RegisterEvent(menu.name .. ".maintenance.repair.facility", function(_, value) menu.maintenanceRepairOpenValue("facility", value) end)
+    RegisterEvent(menu.name .. ".maintenance.repair.complete", menu.maintenanceRepairOpenComplete)
+    RegisterEvent(menu.name .. ".maintenance.losteditor.fleetunit", menu.maintenanceLostEditorValue)
+    RegisterEvent(menu.name .. ".maintenance.losteditor.complete", menu.maintenanceLostEditorComplete)
     RegisterEvent(menu.name .. ".academy.snapshot.begin", academySnapshotBegin)
     RegisterEvent(menu.name .. ".academy.snapshot.id", academySnapshotID)
     RegisterEvent(menu.name .. ".academy.snapshot.name", academySnapshotName)
@@ -1833,11 +2522,19 @@ local function init()
     RegisterEvent(menu.name .. ".academy.snapshot.seminar", academySnapshotSeminar)
     RegisterEvent(menu.name .. ".academy.snapshot.seminarcount", academySnapshotSeminarCount)
     RegisterEvent(menu.name .. ".academy.snapshot.valid", academySnapshotValid)
+    RegisterEvent(menu.name .. ".academy.snapshot.track", academySnapshotTrack)
+    RegisterEvent(menu.name .. ".academy.snapshot.boarding", academySnapshotBoarding)
     RegisterEvent(menu.name .. ".academy.snapshot.row.commit", academySnapshotRowCommit)
     RegisterEvent(menu.name .. ".academy.snapshot.complete", academySnapshotComplete)
     RegisterEvent(menu.name .. ".protected.snapshot.begin", protectedSnapshotBegin)
     RegisterEvent(menu.name .. ".protected.snapshot.id", protectedSnapshotID)
     RegisterEvent(menu.name .. ".protected.snapshot.complete", protectedSnapshotComplete)
+    RegisterEvent(menu.name .. ".storyoverride.snapshot.begin", storyOverrideSnapshotBegin)
+    RegisterEvent(menu.name .. ".storyoverride.snapshot.id", storyOverrideSnapshotID)
+    RegisterEvent(menu.name .. ".storyoverride.snapshot.complete", storyOverrideSnapshotComplete)
+    RegisterEvent(menu.name .. ".storyanswered.snapshot.begin", menu.storyAnsweredSnapshotBegin)
+    RegisterEvent(menu.name .. ".storyanswered.snapshot.id", menu.storyAnsweredSnapshotID)
+    RegisterEvent(menu.name .. ".storyanswered.snapshot.complete", menu.storyAnsweredSnapshotComplete)
     RegisterEvent(menu.name .. ".vacancy.snapshot.begin", vacancySnapshotBegin)
     RegisterEvent(menu.name .. ".vacancy.snapshot.component", vacancySnapshotComponent)
     RegisterEvent(menu.name .. ".vacancy.snapshot.name", vacancySnapshotName)
@@ -1845,6 +2542,25 @@ local function init()
     RegisterEvent(menu.name .. ".vacancy.snapshot.sector", vacancySnapshotSector)
     RegisterEvent(menu.name .. ".vacancy.snapshot.row.commit", vacancySnapshotRowCommit)
     RegisterEvent(menu.name .. ".vacancy.snapshot.complete", vacancySnapshotComplete)
+    RegisterEvent(menu.name .. ".marine.snapshot.begin", marineTargetSnapshotBegin)
+    RegisterEvent(menu.name .. ".marine.snapshot.component", marineTargetSnapshotComponent)
+    RegisterEvent(menu.name .. ".marine.snapshot.name", marineTargetSnapshotName)
+    RegisterEvent(menu.name .. ".marine.snapshot.idcode", marineTargetSnapshotIDCode)
+    RegisterEvent(menu.name .. ".marine.snapshot.sector", marineTargetSnapshotSector)
+    RegisterEvent(menu.name .. ".marine.snapshot.relationship", marineTargetSnapshotRelationship)
+    RegisterEvent(menu.name .. ".marine.snapshot.people", marineTargetSnapshotPeople)
+    RegisterEvent(menu.name .. ".marine.snapshot.capacity", marineTargetSnapshotCapacity)
+    RegisterEvent(menu.name .. ".marine.snapshot.marines", marineTargetSnapshotMarines)
+    RegisterEvent(menu.name .. ".marine.snapshot.row.commit", marineTargetSnapshotRowCommit)
+    RegisterEvent(menu.name .. ".marine.snapshot.complete", marineTargetSnapshotComplete)
+    RegisterEvent(menu.name .. ".store.snapshot.begin", storeSnapshotBegin)
+    RegisterEvent(menu.name .. ".store.snapshot.balance", storeSnapshotBalance)
+    for tier = 1, 5 do
+        local capturedTier = tier
+        RegisterEvent(menu.name .. ".store.snapshot.pilot." .. tostring(capturedTier), function(_, value) storePilotTier(capturedTier, value) end)
+        RegisterEvent(menu.name .. ".store.snapshot.marine." .. tostring(capturedTier), function(_, value) storeMarineTier(capturedTier, value) end)
+    end
+    RegisterEvent(menu.name .. ".store.snapshot.complete", storeSnapshotComplete)
 end
 
 init()

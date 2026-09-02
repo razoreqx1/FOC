@@ -12,7 +12,7 @@ local access = {
 }
 
 local function signalFOC()
-    DebugError("[FOC][B020][ACCESS] stage=OPEN_EVENT_RAISED")
+    DebugError("[FOC][B025][ACCESS] stage=OPEN_EVENT_RAISED")
     AddUITriggeredEvent("FOC_Access", "open", nil)
 end
 
@@ -50,14 +50,14 @@ local function registerOnMenu(targetMenu, owner)
     targetMenu.registerCallback("display_on_after_main_interactions", addFOCAction, access.callbackID)
     access.registeredMenus[targetMenu] = true
     access.menu = targetMenu
-    DebugError("[FOC][B020][ACCESS] stage=CALLBACK_REGISTERED owner=" .. tostring(owner) .. " attempts=" .. tostring(access.attempts + 1))
+    DebugError("[FOC][B025][ACCESS] stage=CALLBACK_REGISTERED owner=" .. tostring(owner) .. " attempts=" .. tostring(access.attempts + 1))
     return true
 end
 
 local function reconcileFinalOwner()
     local finalMenu = Helper.getMenu("DockedMenu")
     local registered = registerOnMenu(finalMenu, "FINAL_ACTIVE_MENU")
-    DebugError("[FOC][B020][ACCESS] stage=FINAL_RECONCILE registered=" .. tostring(registered) .. " recurring_watchdog=0")
+    DebugError("[FOC][B025][ACCESS] stage=FINAL_RECONCILE registered=" .. tostring(registered) .. " recurring_watchdog=0")
 end
 
 local function scheduleFinalReconcile()
@@ -80,7 +80,7 @@ local function init()
     if access.attempts < access.maxAttempts and Helper and type(Helper.addDelayedOneTimeCallbackOnUpdate) == "function" then
         Helper.addDelayedOneTimeCallbackOnUpdate(init, true, getElapsedTime() + 1)
     else
-        DebugError("[FOC][B020][ACCESS_BLOCKED] DockedMenu callback unavailable; retries=" .. tostring(access.attempts))
+        DebugError("[FOC][B025][ACCESS_BLOCKED] DockedMenu callback unavailable; retries=" .. tostring(access.attempts))
     end
 end
 
