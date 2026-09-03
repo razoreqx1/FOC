@@ -11,7 +11,7 @@
 ## Manual installation
 
 1. Close X4: Foundations normally.
-2. Download [`FOC_v149_GA.zip`](../dist/FOC_v149_GA.zip).
+2. Download [`FOC_v154_GA.zip`](../dist/FOC_v154_GA.zip).
 3. Extract the archive.
 4. Copy the contained lowercase `jk_foc` folder into the X4 `extensions` directory.
 
@@ -36,8 +36,15 @@ Unsubscribe from the Workshop item or, for a manual installation, close X4 and r
 
 ## Verifying the archive
 
-The v1.49 GA archive SHA-256 is:
+The v1.54 GA archive SHA-256 is:
 
 ```text
-9CF991A08DEB30CE27993EC293206602151C5DC1490C17B82A7AE9DC3A2A073B
+2660EF2952CB4F995534832FE2F35BD280FF3A4C39E55759670D769E0C129F5A
 ```
+
+
+## Version 1.54 saved carrier settings
+
+After installing the complete v1.54 package with X4 closed, load your game and choose the intended carrier in **Fleets -> Strategic Ops -> Carrier Air Wings**. Check **Saved wing** for the exact carrier/group profile. A dropdown change alone is not a saved setting. Use Apply deliberately, check readback, and save the game normally.
+
+The archive link and checksum above identify the v1.54 distribution.

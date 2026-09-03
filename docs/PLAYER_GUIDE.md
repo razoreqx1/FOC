@@ -1,8 +1,8 @@
-# Fleet Operations Command v1.49 - Complete Player Guide
+# Fleet Operations Command v1.54 - Complete Player Guide
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 
-**Applies to:** Fleet Operations Command v1.49, Build 050
+**Applies to:** Fleet Operations Command v1.54, Build 055
 
 **Game:** X4: Foundations
 
@@ -10,7 +10,7 @@
 
 FOC is designed to be safe. It explains what it found, what it plans to do, and why an action was allowed or blocked. You stay in command.
 
-Older reference screenshots may show an earlier build number. Those screenshots document the exact runtime sessions that proved the pictured workflow. The text in this guide is current for Build 050, including the dedicated FOC Historical Intelligence Map delivered in v1.49.
+Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. The text in this guide is current for Build 055, including the dedicated FOC Historical Intelligence Map introduced in v1.49 and the Strategic Ops additions in v1.54.
 
 ---
 
@@ -74,7 +74,7 @@ Do not place `jk_foc` inside a second `jk_foc` folder. Do not mix files from dif
 
 Steam updates the Workshop copy automatically. For a manual copy, close X4, preserve the previous folder if you want a rollback copy, and replace the complete `jk_foc` folder.
 
-Version 1.49 migrates valid FOC plans, recovery records, Academy state, exact story-ship answers, Task Forces, templates, reports, operations policy, pirate observations, and enrolled-fleet patrol traversals from existing saves. The migration repairs or discards malformed records conservatively. Missing evidence remains blocked instead of being guessed.
+Existing-save initialization preserves valid FOC plans, recovery records, Academy state, exact story-ship answers, Task Forces, templates, reports, operations policy, pirate observations, and enrolled-fleet patrol traversals from existing saves. The migration repairs or discards malformed records conservatively. Missing evidence remains blocked instead of being guessed.
 
 ### Removing
 
@@ -94,7 +94,7 @@ The top bar has ten tabs:
 
 1. **COMMAND** - fleet status, global authority, plan controls, and emergency stop.
 2. **FLEETS** - fleet selection, Home, patrol, distress rules, story protection, and maintenance.
-3. **TASK FORCES** - named multi-fleet groups, defense zones, active/reserve roles, and bounded rotation.
+3. **STRATEGIC OPS** - Workspace dropdown for Task Forces, Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
 4. **READINESS** - captain coverage, proven vacancies, and unknown evidence.
 5. **TRAINING ACADEMY** - Pilot and Marine trainees, seminars, assignments, and captain auto-fill.
 6. **ACADEMY STORE** - approved training-supply purchases and inventory results.
@@ -284,22 +284,20 @@ FOC retains at most 200 valid pirate observations and 250 valid patrol traversal
 
 ---
 
-## 8. TASK FORCES - coordinate several fleets
+## 8. STRATEGIC OPS - Task Forces and linked workspaces
 
-![Task Force workflow with optional next-step pointers](images/11_Task_Forces_v139.png)
+![Task Force workflow with optional next-step pointers](images/v154/06_Task_Forces_Updated_B052.jpg)
 
 Task Forces are named FOC groups for coordinating existing X4 fleets. They do not merge ships, move subordinates, or replace X4's native fleet hierarchy. FOC stores at most eight Task Forces, and one fleet can belong to only one Task Force.
 
 ### Create a Task Force
 
-1. Open **TASK FORCES**.
-2. Enter or accept a unique Task Force name.
-3. Choose a response priority: **HIGH**, **NORMAL**, or **LOW**.
-4. Choose a Home-sector zone: **HIGH**, **NORMAL**, or **EXCLUDED**.
-5. Choose a response range.
-6. Choose **MANUAL** or **FULL AUTOMATION** rotation.
-7. Select **CREATE TASK FORCE**.
-8. Read the result before assigning fleets.
+1. Open **STRATEGIC OPS** and select **TASK FORCES** in the Workspace dropdown.
+2. Select **CREATE TASK FORCE** for the next available named group.
+3. Select that Task Force and choose its name and defense-plan settings.
+4. Choose response priority, Home-sector zone, response range, and rotation mode.
+5. Select **SAVE TASK FORCE DEFENSE PLAN**.
+6. Read the result before assigning fleets.
 
 An **EXCLUDED** zone tells FOC not to use that Task Force for incidents in its saved Home sector. A **HIGH** zone raises it ahead of normal-zone choices when every other safety check passes. Zone and priority settings never override ownership, story protection, readiness, distance, or locks.
 
@@ -325,6 +323,112 @@ In **FULL AUTOMATION**, rotation shares FOC's existing 30-second one-mutation bo
 ### Remove or delete safely
 
 Removing a fleet from a Task Force changes only FOC's grouping. Deleting a Task Force does not delete ships or X4 fleets. Always read the visible result because active or reserve references must be cleared consistently.
+
+---
+
+
+## 8A. CARRIER AIR WINGS - configure the selected carrier
+
+![Carrier Air Wings with saved settings and native readback](images/v154/01_Carrier_Air_Wings_B055.jpg)
+
+Open **FLEETS**, select the carrier, then open **STRATEGIC OPS** and choose **CARRIER AIR WINGS** from **Workspace**. The commander must be an X4 carrier with at least one direct subordinate group. A battleship such as an Asgard is not a carrier for this page.
+
+1. Confirm the selected fleet and **Direct group**.
+2. Read **Saved wing**: this is the stored carrier ID, group, role, and damage-recall threshold.
+3. Choose the role and threshold in the editable dropdowns.
+4. Read **Editor** to distinguish an unsaved change from a matching saved profile.
+5. Select **APPLY TO THIS EXACT X4 GROUP AND SAVE PROFILE** when you want the native assignment changed and the profile saved.
+6. Check the returned result and **Native readback**. Save the game normally to retain the resulting state in that save.
+
+The roles map to native X4 group assignments:
+
+- **INTERCEPTOR**: interception.
+- **BOMBER**: bombardment.
+- **ESCORT**: defence.
+- **RESERVE**: defence with dock-at-commander enabled. A saved ready reserve can be launched by FOC's carrier combat-response logic; this is not a permanent stay-docked lock.
+
+Changing a dropdown alone does not save the profile. For example, an editable 80% threshold beside **Saved wing: RECALL 90%** means the active saved setting is still 90%. Refresh and navigation retain the keyed draft during the session. A fresh load reads saved settings for the exact carrier and group. Two ships with the same name do not share a profile.
+
+**RECALL THIS GROUP - ENABLE NATIVE DOCK AT COMMANDER** requests the Reserve profile for that group; it is a consequential action, not a preview. The saved damage threshold is used when an attacked wing member reaches that hull percentage or lower. Raising the threshold does not damage a ship or itself prove that a recall occurred. The Recovery evidence count is a sampled fleet-member hull count, not proof of selected-group docking or repair.
+
+FOC distinguishes a requested recall from native readback and physical recovery. A hull-and-docking recovery result requires the group's members to be docked at the carrier with full hull. It does not prove ammunition or equipment replenishment, and does not by itself automatically relaunch the recovered group.
+
+### Inspect the live fleet without applying the draft
+
+![Selected carrier in the live native X4 map](images/v154/07_Native_Map_Fleet_Inspection.jpg)
+
+Use **SHOW SELECTED FLEET / SHIP IN X4 MAP** at the bottom of Carrier Air Wings. This opens the ordinary live X4 map on the selected commander; opening it does not Apply or send orders. Normal X4 map actions remain available, so orders you manually issue there are real orders.
+
+Use Back to return to FOC, then compare **Saved wing**, **Editor**, and **Native readback**. Location marking for Home, rally points, and assault targets still uses the dedicated FOC map, not this inspection button.
+
+---
+
+## 8B. SECTOR DEFENSE GRID - coordinate saved posts
+
+![Sector Defense Grid configuration](images/v154/02_Sector_Defense_Grid_B054.jpg)
+
+Choose **STRATEGIC OPS -> Workspace -> SECTOR DEFENSE GRID**. Create a Task Force and set member Homes first.
+
+1. Select the Task Force.
+2. Set **Grid range** and **Reserve escalation** urgency.
+3. Check Coverage, including the active and reserve fleet IDs.
+4. Select **SAVE EXACT TASK FORCE, RANGE, AND RESERVE THRESHOLD**.
+5. Use **APPROVE CURRENT-INCIDENT DISPATCH** only when you intend to send eligible fleets to a current incident.
+6. Use **RETURN GRID FLEETS TO SAVED POSTS** to request return from retained FOC grid orders.
+
+Saving the grid is separate from dispatching it. Dispatch uses named native Protect Position orders. Return targets retained FOC orders rather than indiscriminately cancelling every fleet order. Read the result and inspect actual fleet movement.
+
+---
+
+## 8C. CONVOY ESCORT - protect a civilian ship
+
+![Convoy Escort selection and attach/release controls](images/v154/03_Convoy_Escort_B054.jpg)
+
+Choose **STRATEGIC OPS -> Workspace -> CONVOY ESCORT**.
+
+1. Refresh strategic evidence if the miner, trader, or escort is absent.
+2. Select **Protected civilian** and **Escort fleet**, checking both identity codes.
+3. Read **Trip evidence** for the civilian's current order.
+4. Select **ATTACH ESCORT - NATIVE DEFENCE** to request the temporary native defence assignment.
+5. Read the result before leaving the page.
+6. Select **RELEASE AND RESTORE ESCORT** when you want to release the retained assignment and restore its prior hierarchy.
+
+FOC does not replace the miner or trader's order. The escort assignment changes native hierarchy temporarily, so choose the escort deliberately. Selection and Refresh alone do not attach it. A missing current civilian order blocks attachment.
+
+---
+
+## 8D. MOBILE LOGISTICS - assign an auxiliary
+
+![Mobile Logistics auxiliary and supply evidence](images/v154/04_Mobile_Logistics_B054.jpg)
+
+Choose **STRATEGIC OPS -> Workspace -> MOBILE LOGISTICS**.
+
+1. Select an eligible **Auxiliary** and the **Supported fleet**.
+2. Inspect the native supply-ware counts, deficits, and estimated budget.
+3. Select **ASSIGN AUXILIARY TO SUPPLY FLEET** to request X4's native supply-fleet assignment.
+4. Read the assignment result and inspect the ships in X4.
+5. Use **RELEASE AUXILIARY** to request release of the retained assignment.
+
+The budget is information, not a quote or spending approval. FOC does not purchase supplies, transfer cargo, buy blueprints, or equip ships from this page. A zero-ware/zero-deficit display is not proof that every ship has all ammunition or consumables. X4 supplies and compatibility still govern actual replenishment.
+
+---
+
+## 8E. COORDINATED ASSAULT - plan, rally, and launch
+
+![Coordinated Assault planning controls](images/v154/05_Coordinated_Assault_B054.jpg)
+
+Choose **STRATEGIC OPS -> Workspace -> COORDINATED ASSAULT**.
+
+1. Select a Task Force and **Minimum readiness**.
+2. Select **CHOOSE EXACT RALLY POINT ON FOC MAP** and mark the intended point.
+3. Select **CHOOSE EXACT ATTACKABLE TARGET ON FOC MAP** and choose the intended object.
+4. Confirm the returned point and target, then **SAVE TASK FORCE, RALLY, TARGET, AND READINESS**.
+5. For each member, select **Role fleet**, choose INTERCEPT, BOMBARDMENT, CAPITAL ASSAULT, or RESERVE, and save its explicit role.
+6. Select **RALLY GROUP** when you intend to move the group.
+7. Select **LAUNCH WHEN READINESS MATCHES** when you intend to attack.
+8. Use **ABORT RETAINED FOC ORDERS AND RETURN TO SAVED POSTS** to request withdrawal from retained FOC assault orders.
+
+Map selection and saving a plan are separate from issuing orders. Rally uses named Move and Wait orders; Launch uses named Attack orders against the selected target. Reserve-role members rally but do not launch with the assault. Readiness, identity, ownership, and safety checks still apply. Abort addresses only retained current FOC orders; verify the resulting fleet state in X4.
 
 ---
 
@@ -594,6 +698,11 @@ Old or removed mods can leave malformed ship or crew state. FOC blocks uncertain
 
 ## 18. Troubleshooting
 
+### Carrier threshold and saved profile disagree
+
+Read **Saved wing** and **Editor**, not just the dropdown. A changed dropdown is a draft until Apply succeeds. Confirm the carrier ID and group. Use the native-map inspection button to check actual assignments; do not repeatedly Apply to hide a discrepancy. Include both rows in a bug-report screenshot.
+
+
 ### FOC does not appear
 
 - Confirm the extension is enabled.
@@ -700,7 +809,7 @@ Report issues at [github.com/razoreqx1/FOC/issues](https://github.com/razoreqx1/
 
 ### Create and rotate a Task Force
 
-`TASK FORCES -> CREATE -> add fleets -> choose ACTIVE and RESERVE -> save -> preview rotation -> ROTATE -> verify both commanders in X4`
+`STRATEGIC OPS -> TASK FORCES -> CREATE -> add fleets -> choose ACTIVE and RESERVE -> save -> preview rotation -> ROTATE -> verify both commanders in X4`
 
 ### Make escorts dock with their commander
 

@@ -1,6 +1,54 @@
-Fleet Operations Command - Build 050 / version 149
+Fleet Operations Command - Build 055 / version 154
 
 Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
+
+Build 055 restores saved carrier wing settings by exact carrier ID and group.
+The Saved wing row shows persistent readback separately from the editable draft.
+Unsaved edits survive Refresh, group/carrier switches, and native-map Back.
+Missing/invalid wing evidence is explicit and blocks Apply/Recall until valid.
+New groups show an unsaved default draft, never a claimed saved 70-percent setting.
+Reload testing must inspect the Saved wing row and CARRIER_SAVED_READBACK log
+before pressing Apply. This build does not change automatic recall or orders.
+
+Build 054 fixed the carrier result-message format and prevents the strategic
+Refresh button from replacing the last saved action result. Carrier Air Wings
+now has a bottom SHOW SELECTED FLEET / SHIP IN X4 MAP button. It opens X4's
+live native map on the exact selected commander for inspection; opening it
+does not apply settings or send orders. X4's normal map controls remain live.
+Use Back to return to FOC with the selected fleet and unsaved wing draft.
+FOC Home/rally/target marking still uses the dedicated FOC Operations Map.
+Native-map focus/Back behavior and game save/reload require runtime acceptance.
+
+Build 053 adds exact-carrier preflight before wing changes, direct native
+identity for profile saves, correlated save replies, and conditional rollback
+when persistence is rejected. Strategic refresh counts no longer replace the
+last action result. Null-sector ships display UNKNOWN instead of a lookup error.
+Rollback will not overwrite a group whose settings changed after the request.
+Interrupted transactions and save/reload still require runtime acceptance.
+
+Build 052 corrects the Build 051 strategic snapshot and carrier-automation
+bridges by using the proven scalar-field-plus-commit event contract already
+accepted elsewhere in FOC. It also guards commander identity reads and owns
+the production-observation group before subscribing to its native event.
+
+Build 051 completed the published strategic roadmap in one governed TEST
+candidate. STRATEGIC OPS now includes the Carrier Air-Wing Manager, Sector
+Defense Grid, Convoy Escort Operations, Mobile Logistics Fleet, and Coordinated
+Assault Group. Carrier roles use X4's native group assignments and dock-at-
+commander state with immediate readback and rollback. Defense and assault use
+bounded named orders retained by FOC; return or abort only cancels the exact
+current FOC order before restoring the fleet's saved Home order. Convoy escorts
+use native Defence assignment without replacing the civilian's trade or mining
+order. Proven auxiliary ships use native Supply Fleet assignment; FOC does not
+buy cargo, spend credits, or invent resources.
+
+The Historical Intelligence Map adds Combat Hotspots, Trade Route Risk,
+Logistics Pressure, Economic Hotspots, Empire Trouble Spots, and Historical
+Trends. Filter-colored route strokes and sector cross-markers are independent
+of faction colors. All scores come from bounded player-observed attacks,
+completed player trades, player-station production, pirate evidence, or enrolled
+fleet traversal evidence. No observation is fabricated. Exact rally positions
+and attackable assault targets are selected on the dedicated FOC map.
 
 Build 050 keeps the Operations Map analysis dropdown open while it owns input.
 Hover intelligence refreshes are deferred until the dropdown closes, preventing

@@ -7,24 +7,30 @@
 Fleet Operations Command (FOC) is a player-first fleet readiness, patrol, recovery, training, and distress-response console for **X4: Foundations**. It turns large-empire fleet management into clear, bounded decisions while keeping the player in command.
 
 [![Steam Workshop](https://img.shields.io/badge/Steam-Workshop-1b2838?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
-![Release](https://img.shields.io/badge/release-v1.49-blue)
+![Release](https://img.shields.io/badge/release-v1.54-blue)
 ![Game](https://img.shields.io/badge/game-X4%3A%20Foundations-orange)
 
 ## Current release
 
-- Public version: **1.49**
-- Governed runtime identity: **Build 050 / extension version 149**
-- Release archive: [`dist/FOC_v149_GA.zip`](dist/FOC_v149_GA.zip)
-- Release SHA-256: `9CF991A08DEB30CE27993EC293206602151C5DC1490C17B82A7AE9DC3A2A073B`
-- Complete player guide: [`docs/FOC_v1.49_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.49_COMPLETE_PLAYER_GUIDE.pdf)
+- Public version: **1.54**
+- Governed runtime identity: **Build 055 / extension version 154**
+- Release archive: [`dist/FOC_v154_GA.zip`](dist/FOC_v154_GA.zip)
+- Release SHA-256: `2660EF2952CB4F995534832FE2F35BD280FF3A4C39E55759670D769E0C129F5A`
+- v1.54 player guide: [`docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf)
 - Browser-readable player guide: [`docs/PLAYER_GUIDE.md`](docs/PLAYER_GUIDE.md)
 - Steam Workshop: [Fleet Operations Command](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
 
-This repository contains the same seven runtime files as the tested and accepted GA release. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
+This repository contains the same eight runtime files as the tested and accepted GA release. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
+
+## v1.54 documentation
+
+The [updated player guide](docs/PLAYER_GUIDE.md) covers Build 055's Strategic Ops workspaces and saved carrier settings. The current release archive and source below contain the matching Build 055 runtime.
 
 ## Features
 
 - **One-button patrol deployment** — configure a complete plan and send only the selected fleet.
+- **Strategic Ops workspaces** — Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault, with separate configuration and action controls.
+- **Carrier saved-profile clarity** — exact carrier/group settings, separate saved and draft values, and direct inspection through the live X4 map.
 - **Named task forces** — group save-backed fleet identities into active/reserve defense teams without changing X4's native fleet hierarchy.
 - **Plans, templates, and presets** — save fleet drafts, reuse plans, and preview every consequential action before sending orders.
 - **Structural fleet discovery** — finds eligible combat fleets from X4's live commander hierarchy instead of names, old markers, or a partial faction-ship sample.
@@ -59,7 +65,7 @@ Subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedet
 ### Manual installation
 
 1. Close X4: Foundations.
-2. Download [`FOC_v149_GA.zip`](dist/FOC_v149_GA.zip).
+2. Download [`FOC_v154_GA.zip`](dist/FOC_v154_GA.zip).
 3. Extract the lowercase `jk_foc` folder into the game's `extensions` directory.
 4. Confirm the final path ends with `X4 Foundations/extensions/jk_foc/content.xml`.
 5. Start X4 and enable Fleet Operations Command if needed.

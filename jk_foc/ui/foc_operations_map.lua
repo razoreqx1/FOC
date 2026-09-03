@@ -11,6 +11,7 @@ void GetMapState(UniverseID holomapid, HoloMapState* state);
 UniverseID GetMapPositionOnEcliptic2(UniverseID holomapid, UIPosRot* position, bool adaptiveecliptic, UniverseID eclipticsectorid, UIPosRot eclipticoffset);
 UniverseID GetPickedMapComponent(UniverseID holomapid);
 bool IsKnownToPlayer(UniverseID componentid);
+bool IsComponentClass(UniverseID componentid, const char* classname);
 void RemoveHoloMap(void);
 void SetMapFocus(UniverseID holomapid, bool value);
 void SetMapPicking(UniverseID holomapid, bool enable);
@@ -50,6 +51,7 @@ local menu = {
     analysisFilter = "OVERVIEW",
     pirateObservations = {},
     patrolTraversals = {},
+    strategicObservations = {},
     gateEdges = {},
     routeRects = {},
     routeScan = nil,
@@ -85,8 +87,14 @@ local neutral = { r = 185, g = 195, b = 205, a = 100 }
 local yellow = { r = 255, g = 224, b = 80, a = 92 }
 local filterOptions = {
     { id = "OVERVIEW", text = "OVERVIEW", icon = "", displayremoveoption = false },
+    { id = "COMBAT HOTSPOTS", text = "COMBAT HOTSPOTS", icon = "", displayremoveoption = false },
     { id = "PIRATE ACTIVITY", text = "PIRATE ACTIVITY", icon = "", displayremoveoption = false },
+    { id = "TRADE ROUTE RISK", text = "TRADE ROUTE RISK", icon = "", displayremoveoption = false },
     { id = "HEAVY PATROL ROUTES", text = "HEAVY PATROL ROUTES", icon = "", displayremoveoption = false },
+    { id = "LOGISTICS PRESSURE", text = "LOGISTICS PRESSURE", icon = "", displayremoveoption = false },
+    { id = "ECONOMIC HOTSPOTS", text = "ECONOMIC HOTSPOTS", icon = "", displayremoveoption = false },
+    { id = "EMPIRE TROUBLE SPOTS", text = "EMPIRE TROUBLE SPOTS", icon = "", displayremoveoption = false },
+    { id = "HISTORICAL TRENDS", text = "HISTORICAL TRENDS", icon = "", displayremoveoption = false },
 }
 
 local function safeText(value, fallback)
@@ -177,6 +185,33 @@ local function routeMetrics()
                 end
             end
         end
+    else
+        local wanted = {
+            ["COMBAT HOTSPOTS"] = { COMBAT = true, LOSS = true },
+            ["TRADE ROUTE RISK"] = { TRADE_RISK = true, CONVOY_ATTACK = true, CONVOY_LOSS = true, CONVOY_SEPARATION = true },
+            ["LOGISTICS PRESSURE"] = { LOGISTICS = true, SUPPLY_BLOCKED = true, SUPPLY_FAILED = true },
+            ["ECONOMIC HOTSPOTS"] = { TRADE_COMPLETE = true, PRODUCTION = true },
+            ["EMPIRE TROUBLE SPOTS"] = { COMBAT = true, LOSS = true, TRADE_RISK = true, CONVOY_ATTACK = true, CONVOY_LOSS = true, LOGISTICS = true, SUPPLY_BLOCKED = true, SUPPLY_FAILED = true },
+            ["HISTORICAL TRENDS"] = { COMBAT = true, LOSS = true, TRADE_RISK = true, LOGISTICS = true, TRADE_COMPLETE = true, PRODUCTION = true },
+        }
+        local accepted, bySector = wanted[menu.analysisFilter] or {}, {}
+        local priorCutoff = cutoff - (tonumber(menu.window) or 60) * 60
+        for _, entry in ipairs(menu.strategicObservations or {}) do
+            local when, sector = tonumber(entry.time) or 0, tostring(entry.sectorid or "")
+            if accepted[tostring(entry.kind)] and sector ~= "" and when >= priorCutoff then
+                local state = bySector[sector] or { current = 0, prior = 0 }
+                local weight = math.max(1, tonumber(entry.severity) or tonumber(entry.amount) or 1)
+                if when >= cutoff then state.current = state.current + weight else state.prior = state.prior + weight end
+                bySector[sector] = state
+            end
+        end
+        for _, edge in ipairs(menu.gateEdges or {}) do
+            local left, right = bySector[tostring(edge.from)] or { current = 0, prior = 0 }, bySector[tostring(edge.to)] or { current = 0, prior = 0 }
+            local score = left.current + right.current
+            if menu.analysisFilter == "HISTORICAL TRENDS" then score = math.max(0, score - left.prior - right.prior) end
+            local key = routeKey(edge.from, edge.to)
+            if key and score > 0 then result[key] = { from = tostring(edge.from), to = tostring(edge.to), score = score } end
+        end
     end
     return result
 end
@@ -185,18 +220,41 @@ local function drawRouteStrokes()
     hideRouteRects()
     local metrics = routeMetrics()
     local ordered = {}
+    local sectorScores = {}
     for _, entry in pairs(metrics) do ordered[#ordered + 1] = entry end
+    for _, entry in ipairs(ordered) do
+        sectorScores[entry.from] = math.max(sectorScores[entry.from] or 0, entry.score)
+        sectorScores[entry.to] = math.max(sectorScores[entry.to] or 0, entry.score)
+    end
     table.sort(ordered, function(a, b) return a.score > b.score end)
     local drawn = 0
     for _, entry in ipairs(ordered) do
         local from, to = menu.routeCenters[entry.from], menu.routeCenters[entry.to]
         if from and to and drawn < config.maxRouteStrokes then
-            local color = entry.score >= 6 and red or entry.score >= 3 and amber or yellow
+            local color
+            if menu.analysisFilter == "ECONOMIC HOTSPOTS" then color = entry.score >= 6 and green or entry.score >= 3 and cyan or yellow
+            elseif menu.analysisFilter == "LOGISTICS PRESSURE" then color = entry.score >= 6 and amber or yellow
+            else color = entry.score >= 6 and red or entry.score >= 3 and amber or yellow end
             local ok, rect = pcall(Helper.drawLine, { x = from.x, y = from.y }, { x = to.x, y = to.y }, entry.score >= 6 and 7 or 5, 1, color, true)
             if ok and rect then menu.routeRects[#menu.routeRects + 1] = rect; drawn = drawn + 1 end
         end
     end
-    DebugError("[FOC][B050][ROUTE_DRAW] filter=" .. menu.analysisFilter .. " evidence_edges=" .. tostring(#ordered) .. " visible_strokes=" .. tostring(drawn) .. " neutral_native_routes=VISIBLE")
+    local marked = 0
+    for id, score in pairs(sectorScores) do
+        local center = menu.routeCenters[id]
+        if center and marked < 80 then
+            local color
+            if menu.analysisFilter == "ECONOMIC HOTSPOTS" then color = score >= 6 and green or score >= 3 and cyan or yellow
+            elseif menu.analysisFilter == "LOGISTICS PRESSURE" then color = score >= 6 and amber or yellow
+            else color = score >= 6 and red or score >= 3 and amber or yellow end
+            local ok1, line1 = pcall(Helper.drawLine, { x = center.x - 13, y = center.y }, { x = center.x + 13, y = center.y }, 7, 1, color, true)
+            local ok2, line2 = pcall(Helper.drawLine, { x = center.x, y = center.y - 13 }, { x = center.x, y = center.y + 13 }, 7, 1, color, true)
+            if ok1 and line1 then menu.routeRects[#menu.routeRects + 1] = line1 end
+            if ok2 and line2 then menu.routeRects[#menu.routeRects + 1] = line2 end
+            if ok1 and line1 and ok2 and line2 then marked = marked + 1 end
+        end
+    end
+    DebugError("[FOC][B055][ROUTE_DRAW] filter=" .. menu.analysisFilter .. " evidence_edges=" .. tostring(#ordered) .. " visible_strokes=" .. tostring(drawn) .. " evidence_sector_markers=" .. tostring(marked) .. " colors=FILTER_NOT_FACTION neutral_native_routes=VISIBLE")
 end
 
 local function startRouteScan(delay)
@@ -321,6 +379,29 @@ local function selectedFilterEvidence()
             if (tostring(entry.from) == sectorID or tostring(entry.to) == sectorID) and (tonumber(entry.time) or 0) >= cutoff then count = count + 1 end
         end
         return tostring(count) .. " OBSERVED ENROLLED-FLEET GATE TRAVERSAL(S)"
+    elseif menu.analysisFilter ~= "OVERVIEW" then
+        local current, prior, affected, details = 0, 0, {}, {}
+        local priorCutoff = cutoff - (tonumber(menu.window) or 60) * 60
+        local accepted = {
+            ["COMBAT HOTSPOTS"] = { COMBAT = true, LOSS = true },
+            ["TRADE ROUTE RISK"] = { TRADE_RISK = true, CONVOY_ATTACK = true, CONVOY_LOSS = true, CONVOY_SEPARATION = true },
+            ["LOGISTICS PRESSURE"] = { LOGISTICS = true, SUPPLY_BLOCKED = true, SUPPLY_FAILED = true },
+            ["ECONOMIC HOTSPOTS"] = { TRADE_COMPLETE = true, PRODUCTION = true },
+            ["EMPIRE TROUBLE SPOTS"] = { COMBAT = true, LOSS = true, TRADE_RISK = true, CONVOY_ATTACK = true, CONVOY_LOSS = true, LOGISTICS = true, SUPPLY_BLOCKED = true, SUPPLY_FAILED = true },
+            ["HISTORICAL TRENDS"] = { COMBAT = true, LOSS = true, TRADE_RISK = true, LOGISTICS = true, TRADE_COMPLETE = true, PRODUCTION = true },
+        }
+        for _, entry in ipairs(menu.strategicObservations or {}) do
+            local when = tonumber(entry.time) or 0
+            if tostring(entry.sectorid or "") == sectorID and (accepted[menu.analysisFilter] or {})[tostring(entry.kind)] and when >= priorCutoff then
+                if when >= cutoff then current = current + 1 else prior = prior + 1 end
+                affected[tostring(entry.subject or "UNKNOWN")] = true
+                if #details < 2 and tostring(entry.detail or "") ~= "" then details[#details + 1] = tostring(entry.detail) end
+            end
+        end
+        local subjects = 0
+        for _ in pairs(affected) do subjects = subjects + 1 end
+        local direction = current > prior and "INCREASING" or current < prior and "DECREASING" or (current + prior >= 2 and "STEADY" or "INSUFFICIENT EVIDENCE")
+        return tostring(current) .. " CURRENT / " .. tostring(prior) .. " PRIOR OBS | " .. tostring(subjects) .. " AFFECTED | " .. direction .. (#details > 0 and (" | " .. table.concat(details, "; ")) or "")
     end
     return "OVERVIEW | ROUTES WITHOUT FILTER EVIDENCE REMAIN NEUTRAL"
 end
@@ -348,7 +429,7 @@ local function createOverlay()
         maxVisibleHeight = Helper.viewHeight - 2 * Helper.frameBorder,
     })
     local row = top:addRow(true, { fixed = true })
-    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 050", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
+    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 055", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
     row[5]:createText("ANALYSIS", { halign = "right", color = cyan })
     row[6]:createDropDown(filterOptions, { startOption = menu.analysisFilter }):setTextProperties({ halign = "center" })
     row[6].handlers.onDropDownActivated = function()
@@ -412,8 +493,10 @@ local function createOverlay()
     prow[1]:createText("FILTER EVIDENCE")
     prow[2]:createText(selectedFilterEvidence(), { color = menu.analysisFilter == "OVERVIEW" and neutral or amber, wordwrap = true })
     prow = panel:addRow(false, { fixed = true })
-    prow[1]:createText("RISK")
+    prow[1]:createText("BASE FOC RISK")
     prow[2]:createText(intel and (level .. " | SCORE " .. tostring(score)) or "NO FOC SECTOR EVIDENCE", { color = intel and riskColor or neutral })
+    prow = panel:addRow(false, { fixed = true })
+    prow[1]:setColSpan(2):createText("FILTER COLORS MARK EVIDENCE ROUTES AND SECTORS; THEY DO NOT REUSE FACTION COLORS", { color = menu.analysisFilter == "OVERVIEW" and neutral or amber, wordwrap = true })
     prow = panel:addRow(false, { fixed = true })
     prow[1]:createText("FLEET PRESENCE")
     prow[2]:createText(intel and joined(intel.fleets, "NONE OBSERVED") or "UNKNOWN", { color = intel and cyan or neutral, wordwrap = true })
@@ -487,6 +570,7 @@ function menu.onShowMenu()
     menu.patrolTraversals = type(menu.param[8]) == "table" and menu.param[8] or {}
     menu.gateEdges = type(menu.param[9]) == "table" and menu.param[9] or {}
     menu.gameTime = tonumber(menu.param[10]) or 0
+    menu.strategicObservations = type(menu.param[11]) == "table" and menu.param[11] or {}
     menu.analysisFilter = "OVERVIEW"
     menu.selectedSectorName = nil
     menu.selectedSectorID = nil
@@ -620,7 +704,28 @@ function menu.onRenderTargetSelect()
     if (not menu.leftdown) or ((menu.leftdown.time + 0.5 > getElapsedTime()) and not Helper.comparePositions(menu.leftdown.position, offset, 5)) then
         local x, y = GetRenderTargetMousePosition(menu.map)
         local resolved = resolveMapPosition(x, y)
-        if resolved and menu.request then
+        if menu.request and menu.request.kind == "ASSAULT_TARGET" then
+            local picked = safeComponent64(C.GetPickedMapComponent(menu.holomap))
+            local parent = menuByName("FOC_Menu")
+            local isobject = picked and C.IsComponentClass(picked, "object")
+            local isplayerowned = false
+            if picked then
+                local luaok, luaid = pcall(ConvertStringToLuaID, tostring(picked))
+                if luaok and luaid then
+                    local dataok, owned = pcall(GetComponentData, luaid, "isplayerowned")
+                    isplayerowned = dataok and owned == true
+                end
+            end
+            local pickedname = picked and componentName(picked) or nil
+            if picked and isobject and not isplayerowned and pickedname and parent and parent.operationsMapTargetSelected then
+                DebugError("[FOC][B055][MAP_TARGET] component=" .. tostring(picked) .. " name=" .. pickedname .. " known_pick=1 player_owned=0 callback=FOC_Menu")
+                menu.leftdown = nil
+                parent.operationsMapTargetSelected(menu, menu.request, { tostring(picked), pickedname })
+                return
+            end
+            menu.notice = "TARGET NOT MARKED - CLICK A KNOWN NON-PLAYER OBJECT ICON"
+            DebugError("[FOC][B055][MAP_TARGET_BLOCKED] picked=" .. tostring(picked or 0) .. " object=" .. tostring(isobject == true) .. " player_owned=" .. tostring(isplayerowned))
+        elseif resolved and menu.request then
             local parent = menuByName("FOC_Menu")
             if parent and parent.operationsMapLocationSelected then
                 DebugError("[FOC][B050][MAP_MARK] kind=" .. tostring(menu.request.kind or "UNKNOWN") .. " sector=" .. resolved.name .. " position=" .. tostring(resolved.position[1]) .. "," .. tostring(resolved.position[2]) .. "," .. tostring(resolved.position[3]) .. " callback=FOC_Menu mutation=REQUEST_SCOPED")

@@ -8,7 +8,7 @@ FOC contains ten focused pages:
 
 1. **Command** — global authority modes and emergency controls.
 2. **Fleets** — Home, patrol, distress, and selected-fleet deployment.
-3. **Task Forces** — save-backed active/reserve defense groups and bounded rotation.
+3. **Strategic Ops** — Task Forces, Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
 4. **Readiness** — captain coverage, proven vacancies, and staffing previews.
 5. **Training Academy** — trainees, seminars, and exact assignments.
 6. **Academy Store** — approved training-supply purchases and verified inventory results.
@@ -65,3 +65,19 @@ Full Automation is optional. It uses the same gates and attempts at most one dis
 ## Captain vacancies
 
 Open **Readiness** to distinguish proven captain vacancies from unknown records. Ships without captains cannot execute normal orders. Use **Training Academy** to review Pilots and Marines, train with native seminars, approve an exact assignment, or preview captain auto-fill. Use **Academy Store** for approved training-supply purchases. FOC never replaces an existing captain without approval.
+
+
+## Configure a carrier wing
+
+Select the carrier on **Fleets**, then **Strategic Ops -> Carrier Air Wings**. Choose the direct group, role, and damage-recall threshold. **Saved wing** is the stored profile; dropdown changes remain drafts until **Apply to this exact X4 group and save profile** succeeds. Save your game normally afterward.
+
+Use **Show selected fleet / ship in X4 map** to inspect the commander without applying the draft. Home, rally-point, and target selection still use the separate FOC Operations Map.
+
+## Other Strategic Ops workspaces
+
+- **Sector Defense Grid:** save Task Force coverage and reserve escalation; dispatch and return have separate buttons.
+- **Convoy Escort:** attach an exact escort to a civilian miner/trader, then release and restore its prior hierarchy.
+- **Mobile Logistics:** assign an auxiliary to native Supply Fleet; no supply purchase or cargo transfer is performed by this page.
+- **Coordinated Assault:** select rally and target on the FOC map, save roles, then explicitly Rally or Launch. Reserve-role fleets rally without launching.
+
+See the [complete player guide](PLAYER_GUIDE.md#8a-carrier-air-wings---configure-the-selected-carrier) for actions and safeguards.

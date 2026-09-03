@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.54 — Build 055
+
+- Added Strategic Ops workspaces for Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
+- Added carrier role/profile controls with exact native group assignment and correlated save readback.
+- Added a direct live X4 map inspection button for the selected carrier or fleet, separate from FOC location marking.
+- Restored saved carrier/group role and recall thresholds into the editor; displayed Saved wing separately from unsaved edits.
+- Preserved keyed carrier drafts through Refresh and navigation.
+- Corrected carrier confirmation formatting and preserved Last Action during strategic refresh.
+- Updated player documentation with the new workspaces, consequential-action boundaries, and menu screenshots.
+
+
 ## v1.49 — Build 050 — 2026-09-03
 
 ### Historical Intelligence Map

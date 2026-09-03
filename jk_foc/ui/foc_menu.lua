@@ -2,9 +2,21 @@ local ffi = require("ffi")
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
+typedef struct { float x; float y; float z; float yaw; float pitch; float roll; } UIPosRot;
+typedef struct { const char* ware; int total; int current; const char* supplytypes; } SupplyResourceInfo;
 UniverseID GetPlayerOccupiedShipID(void);
 bool IsComponentOperational(UniverseID componentid);
 float GetTextHeight(const char*const text, const char*const fontname, const float fontsize, const float wordwrapwidth);
+bool CanContainerEquipShip(UniverseID containerid, UniverseID shipid);
+bool CanContainerSupplyShip(UniverseID containerid, UniverseID shipid);
+const char* GetSubordinateGroupAssignment(UniverseID controllableid, int group);
+void SetSubordinateGroupAssignment(UniverseID controllableid, int group, const char* assignment);
+UniverseID GetSubordinateGroupProtectedSector(UniverseID controllableid, int group);
+UIPosRot GetSubordinateGroupProtectedPosition(UniverseID controllableid, int group);
+void SetSubordinateGroupProtectedLocation(UniverseID controllableid, int group, UniverseID sectorid, UIPosRot offset);
+uint32_t GetNumSupplyOrderResources(UniverseID containerid);
+uint32_t GetSupplyOrderResources(SupplyResourceInfo* result, uint32_t resultlen, UniverseID containerid);
+int64_t GetSupplyBudget(UniverseID containerid);
 void SetSubordinateGroupDockAtCommander(UniverseID controllableid, int group, bool value);
 bool ShouldSubordinateGroupDockAtCommander(UniverseID controllableid, int group);
 void SetSubordinateGroupReinforceFleet(UniverseID controllableid, int group, bool value);
@@ -40,6 +52,19 @@ local menu = {
     mapPirateObservations = {},
     mapPatrolTraversals = {},
     mapGateEdges = {},
+    strategicObservations = {},
+    strategicAssets = {},
+    strategicRecords = { carriers = {}, carrierwings = {}, grids = {}, convoys = {}, logistics = {}, assaults = {} },
+    carrierDrafts = {},
+    strategicIncoming = nil,
+    strategic = {
+        view = "TASK FORCES", assetChoice = 1, secondaryChoice = 1, group = 1,
+        wingRole = "INTERCEPTOR", reserve = "NO", damageHull = 70,
+        defenseRange = "ONE GATE", reserveThreshold = 7,
+        minimumReadiness = 80, selectedRecord = 1,
+        assaultMemberChoice = 1, assaultRole = "CAPITAL ASSAULT",
+        rally = nil, target = nil, pendingMap = nil,
+    },
     homeSectorByFleet = {},
     ordersByFleet = {},
     draftsByFleet = {},
@@ -127,7 +152,7 @@ local bridgeComponent64
 local tabs = {
     { id = "command", label = "COMMAND" },
     { id = "fleets", label = "FLEETS" },
-    { id = "taskforces", label = "TASK FORCES" },
+    { id = "taskforces", label = "STRATEGIC OPS" },
     { id = "readiness", label = "READINESS" },
     { id = "academy", label = "TRAINING ACADEMY" },
     { id = "store", label = "ACADEMY STORE" },
@@ -140,7 +165,7 @@ local tabs = {
 local guides = {
     command = "Preview, approve, or stop bounded FOC planning. Unknown evidence always blocks mutation.",
     fleets = "Choose one fleet, configure its proven orders and response rules, or open Repair / Replace / Rebuild for native maintenance.",
-    taskforces = "Build up to eight save-backed defense groups without changing X4's native fleet hierarchy.",
+    taskforces = "Manage Task Forces, carrier wings, defense grids, convoy escorts, mobile logistics, and coordinated assaults through native X4 assignments and exact readback.",
     readiness = "Missing and unknown evidence are blockers. No unknown value is counted as ready.",
     academy = "Recruit up to 25 combined Pilot and Marine trainees, train them, then assign them to proven destinations.",
     store = "Buy Pilot Lessons or Marine Credits with credits. Every purchase is verified before FOC reports success.",
@@ -165,6 +190,9 @@ local automationPresets = { "PROTECT HOME", "GUARD TRADERS", "DEFEND STATIONS", 
 local fleetFinderOptions = { "ALL FLEETS", "A-F", "G-L", "M-R", "S-Z" }
 local operationsMapFilters = { "OVERVIEW", "PIRATE ACTIVITY", "HEAVY PATROL ROUTES", "FLEET HOMES" }
 local operationsMapWindows = { 15, 60, 180 }
+menu.strategicViews = { "TASK FORCES", "CARRIER AIR WINGS", "SECTOR DEFENSE GRID", "CONVOY ESCORT", "MOBILE LOGISTICS", "COORDINATED ASSAULT" }
+local wingRoles = { "INTERCEPTOR", "BOMBER", "ESCORT", "RESERVE" }
+local wingAssignments = { INTERCEPTOR = "interception", BOMBER = "bombardment", ESCORT = "defence", RESERVE = "defence" }
 
 local function normalizeFleetRole(value)
     local text = tostring(value or "")
@@ -668,6 +696,15 @@ function menu.operationsMapLocationSelected(childMenu, request, value)
             menu.plan.lastResult = "HOME POINT CHOSEN - DRAFT NOT YET SAVED - NO ORDERS SENT"
             DebugError(string.format("[FOC][B050][HOME_MAP_SELECTED] fleet=%s sector=%s sector_key=%s position=%.3f,%.3f,%.3f mutation=DRAFT_ONLY orders=NONE", pending.fleetAudit, sectorName, sectorKey, menu.homeSectorByFleet[pending.fleetKey].position[1], menu.homeSectorByFleet[pending.fleetKey].position[2], menu.homeSectorByFleet[pending.fleetKey].position[3]))
         end
+    elseif pending and pending.kind == "ASSAULT_RALLY" and sector64 and type(position) == "table" then
+        local sectorName = componentName(sector64, "UNKNOWN SECTOR")
+        local sectorKey = stableSectorKey(sector64, sectorName)
+        if sectorKey then
+            menu.strategic.rally = { id = sectorKey, name = sectorName, position = { tonumber(position[1]) or 0, tonumber(position[2]) or 0, tonumber(position[3]) or 0 } }
+            menu.plan.lastResult = "ASSAULT RALLY POINT MARKED IN DRAFT - NO ORDER SENT"
+        else
+            menu.plan.lastResult = "RALLY POINT NOT CHANGED - STABLE SECTOR IDENTITY UNKNOWN"
+        end
     else
         menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP RETURN WAS INVALID - NO ORDERS SENT"
         DebugError("[FOC][B050][HOME_MAP_INVALID] mutation=NONE")
@@ -675,9 +712,33 @@ function menu.operationsMapLocationSelected(childMenu, request, value)
     menu.pendingHomeSelection = nil
     menu.homeReturnMetadata = nil
     if childMenu and childMenu.name == "FOC_OperationsMap" then
-        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 149, "FOC Build 050", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
+        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 154, "FOC Build 055", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
         if childMenu.cleanup then childMenu.cleanup() end
     end
+end
+
+function menu.operationsMapTargetSelected(childMenu, request, value)
+    if type(request) == "table" and request.kind == "ASSAULT_TARGET" and type(value) == "table" and value[1] and value[2] then
+        menu.strategic.target = { id = tostring(value[1]), name = tostring(value[2]) }
+        menu.plan.lastResult = "ASSAULT TARGET MARKED IN DRAFT - NO ORDER SENT"
+    else
+        menu.plan.lastResult = "ASSAULT TARGET NOT CHANGED - EXACT ATTACKABLE COMPONENT WAS NOT PROVEN"
+    end
+    menu.pendingHomeSelection = nil
+    if childMenu and childMenu.name == "FOC_OperationsMap" then
+        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 154, "FOC Build 055", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult })
+        if childMenu.cleanup then childMenu.cleanup() end
+    end
+end
+
+function menu.openStrategicMap(kind)
+    if menu.frame == nil then return end
+    menu.pendingHomeSelection = { kind = kind, token = tostring(getElapsedTime()) }
+    menu.plan.lastResult = kind == "ASSAULT_TARGET" and "FOC MAP OPEN - CLICK AN EXACT ATTACKABLE TARGET; ESCAPE CANCELS" or "FOC MAP OPEN - CLICK THE EXACT RALLY POINT; ESCAPE CANCELS"
+    local intel, unlocated = buildOperationsIntel()
+    Helper.closeMenuAndOpenNewMenu(menu, "FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, menu.pendingHomeSelection, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime, menu.strategicObservations })
+    menu.frame = nil
+    menu.mainTable = nil
 end
 
 local function chooseHomeOnMap(selected)
@@ -695,7 +756,7 @@ local function chooseHomeOnMap(selected)
         menu.param and menu.param[5] or nil,
     }
     local intel, unlocated = buildOperationsIntel()
-    Helper.closeMenuAndOpenNewMenu(menu, "FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, menu.pendingHomeSelection, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime })
+    Helper.closeMenuAndOpenNewMenu(menu, "FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, menu.pendingHomeSelection, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime, menu.strategicObservations })
     menu.frame = nil
     menu.mainTable = nil
 end
@@ -817,8 +878,8 @@ local function pilotEvidence(ship)
 end
 
 local function shipEvidence(ship)
-    local name, fleetname, sector, sectorID, hull, shield, assignment, primarypurpose = GetComponentData(
-        ship, "name", "fleetname", "sector", "sectorid", "hullpercent", "shieldpercent", "assignment", "primarypurpose"
+    local name, fleetname, sector, sectorID, hull, shield, assignment, primarypurpose, shiptype = GetComponentData(
+        ship, "name", "fleetname", "sector", "sectorid", "hullpercent", "shieldpercent", "assignment", "primarypurpose", "shiptype"
     )
     local idcode = componentIDCode(ship)
     local pilot, captainState = pilotEvidence(ship)
@@ -840,6 +901,7 @@ local function shipEvidence(ship)
         shield = tonumber(shield),
         assignment = safeText(assignment, "UNASSIGNED"),
         primarypurpose = safeText(primarypurpose, "UNKNOWN"),
+        shiptype = safeText(shiptype, "UNKNOWN"),
         isMission = isProtectedShipID(idcode),
         storyOverride = isStoryOverrideID(idcode),
         storyAnswered = isStoryAnsweredID(idcode),
@@ -1044,7 +1106,7 @@ local function beginButtonFeedback(value)
     menu.plan.lastResult = menu.notice
 end
 
-local function actionRow(tableWidget, label, value, handler, active, color)
+local function actionRow(tableWidget, label, value, handler, active, color, preserveResult)
     local row = tableWidget:addRow(true)
     row[1]:createText(label, { color = neutralColor })
     local properties = { active = active == true }
@@ -1057,7 +1119,7 @@ local function actionRow(tableWidget, label, value, handler, active, color)
     row[2]:setColSpan(3):createButton(properties):setText(workflowLabel(value, active), { halign = "center" })
     if active == true then
         row[2].handlers.onClick = function()
-            beginButtonFeedback(value)
+            if not preserveResult then beginButtonFeedback(value) end
             handler()
         end
     end
@@ -1226,6 +1288,55 @@ local function openNativeMenu(name, params)
     Helper.closeMenuAndOpenNewMenu(menu, name, params)
     menu.frame = nil
     menu.closeInProgress = false
+end
+
+function menu.openFleetInspection(expectedKey)
+    if not menu.frame or menu.closeInProgress or menu.pendingActionKind or menu.carrierTransaction then return end
+    local selected = menu.strategicFleet(menu.selectedFleet)
+    local commander = selected and selected.commander and bridgeComponent64(selected.commander.object)
+    if not commander or fleetKey(selected) ~= expectedKey or GetComponentData(commander, "isplayerowned") ~= true or GetComponentData(commander, "idcode") ~= selected.commander.idcode then
+        menu.notice = "MAP INSPECTION BLOCKED - THE EXACT SELECTED SHIP IS NO LONGER AVAILABLE"
+        rebuild(false)
+        return
+    end
+    local luaid = componentLuaID(commander)
+    if not luaid then menu.notice = "MAP INSPECTION BLOCKED - INVALID NATIVE SHIP ID"; rebuild(false); return end
+    local top
+    if menu.mainTable and menu.mainTable.id then
+        local ok, value = pcall(GetTopRow, menu.mainTable.id)
+        if ok then top = value end
+    end
+    menu.nativeMapReturn = { key = expectedKey, page = menu.page, activeTab = menu.activeTab,
+        view = menu.strategic.view, group = menu.strategic.group, role = menu.strategic.wingRole,
+        damage = menu.strategic.damageHull, notice = menu.notice, result = menu.plan.lastResult,
+        state = menu.plan.lastState, top = top }
+    DebugError("[FOC][B055][NATIVE_MAP] stage=REQUESTED subject=" .. selected.commander.idcode .. " orders_sent=0")
+    openNativeMenu("MapMenu", { 0, 0, true, luaid, nil, "infomode", { "info", luaid } })
+end
+
+function menu.onSaveState()
+    if menu.nativeMapReturn then return { nativeInspection = true } end
+end
+
+function menu.restoreFleetInspection(state)
+    local saved = menu.nativeMapReturn
+    menu.nativeMapReturn = nil
+    if not saved or type(state) ~= "table" or state.nativeInspection ~= true then return false end
+    menu.page, menu.activeTab = saved.page, saved.activeTab
+    menu.strategic.view, menu.strategic.group = saved.view, saved.group
+    menu.strategic.wingRole, menu.strategic.damageHull = saved.role, saved.damage
+    menu.plan.lastResult, menu.plan.lastState, menu.notice = saved.result, saved.state, saved.notice
+    sampleFleets("NATIVE MAP RETURN")
+    menu.selectedFleet = 0
+    for index, fleet in ipairs(menu.sample.fleets) do
+        if fleetKey(fleet) == saved.key then menu.selectedFleet = index; break end
+    end
+    if menu.selectedFleet == 0 then menu.notice = "MAP RETURN - ORIGINAL FLEET UNAVAILABLE; CHOOSE A FLEET" end
+    menu.restoreTopRow = saved.top
+    AddUITriggeredEvent(menu.name, "strategic_refresh", nil)
+    DebugError("[FOC][B055][NATIVE_MAP] stage=RETURNED fleet_resolved=" .. tostring(menu.selectedFleet ~= 0) .. " draft_preserved=1 orders_sent=0")
+    menu.create()
+    return true
 end
 
 function menu.maintenanceRepairOpenComplete()
@@ -1806,20 +1917,27 @@ local function createHeader(frame, width)
             if tab.id == "operationsmap" then
                 local intel, unlocated = buildOperationsIntel()
                 DebugError("[FOC][B050][MAP_HANDOFF] route=FOC_OPERATIONS_MAP helper_slots=0,0 intel=" .. tostring(#intel) .. " pirate=" .. tostring(#menu.mapPirateObservations) .. " patrol=" .. tostring(#menu.mapPatrolTraversals) .. " edges=" .. tostring(#menu.mapGateEdges) .. " unlocated=" .. tostring(unlocated) .. " return=FOC")
-                openNativeMenu("FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, nil, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime })
+                openNativeMenu("FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, nil, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime, menu.strategicObservations })
                 return
             end
             menu.page = tab.id
             menu.activeTab = tab.id
+            if tab.id == "taskforces" then AddUITriggeredEvent(menu.name, "strategic_refresh", nil) end
             rebuild(true)
         end
     end
-    tabRow[11]:createButton({ active = true }):setText("REFRESH", { halign = "center" })
+    tabRow[11]:createButton({ active = not menu.pendingActionKind and not menu.carrierTransaction }):setText("REFRESH", { halign = "center" })
     tabRow[11].handlers.onClick = function()
-        menu.notice = "REFRESH REQUESTED - WAITING FOR AUTHORITATIVE MD FLEET AND QUEST-PROTECTION SNAPSHOTS"
-        menu.plan.lastResult = menu.notice
-        menu.plan.lastState = "REFRESH_PENDING"
+        if menu.pendingActionKind or menu.carrierTransaction then return end
+        if menu.page == "taskforces" then
+            menu.strategicSnapshotStatus = "REQUESTED"
+        else
+            menu.notice = "REFRESH REQUESTED - WAITING FOR AUTHORITATIVE MD FLEET AND QUEST-PROTECTION SNAPSHOTS"
+            menu.plan.lastResult = menu.notice
+            menu.plan.lastState = "REFRESH_PENDING"
+        end
         AddUITriggeredEvent(menu.name, "refresh", nil)
+        AddUITriggeredEvent(menu.name, "strategic_refresh", nil)
         rebuild(true)
     end
     local feedbackRow = header:addRow(false, { fixed = true })
@@ -1979,7 +2097,7 @@ local function fleetSelectorPane(tableWidget)
     if selectedRow then pcall(tableWidget.setSelectedRow, tableWidget, selectedRow) end
 end
 
-function menu.taskForcesPage(tableWidget)
+local function taskForcesLegacyPage(tableWidget)
     section(tableWidget, "NAMED TASK FORCES")
     textRow(tableWidget, "Scope", "FOC groups saved fleet identities only. It never changes X4's native fleet hierarchy.", passColor)
     textRow(tableWidget, "Capacity", tostring(#menu.taskForces) .. " / 8 TASK FORCES", #menu.taskForces < 8 and neutralColor or warningColor)
@@ -2065,6 +2183,365 @@ function menu.taskForcesPage(tableWidget)
     section(tableWidget, "CONNECTED OPERATIONS")
     actionRow(tableWidget, "Replacement ledger", "OPEN REPAIR / REPLACE / REBUILD", function() menu.page = "fleets"; menu.fleetMode = "maintenance"; rebuild(false) end, true, headingColor)
     actionRow(tableWidget, "Commander development", "OPEN TRAINING ACADEMY", function() menu.page = "academy"; rebuild(false) end, true, headingColor)
+end
+
+function menu.strategicAction(kind, subject, data)
+    if menu.pendingActionKind then return end
+    menu.pendingActionKind = kind
+    menu.notice = kind .. " RECEIVED - WAITING FOR EXACT NATIVE/PERSISTENT READBACK"
+    menu.plan.lastState = "STRATEGIC_PENDING"
+    menu.plan.lastResult = menu.notice
+    AddUITriggeredEvent(menu.name, "strategic_action", { kind, tostring(subject or "NONE"), data or {}, menu.plan.authority, getElapsedTime() })
+    rebuild(false)
+end
+
+function menu.strategicFleet(index)
+    return menu.sample and menu.sample.fleets and menu.sample.fleets[index] or nil
+end
+
+function menu.carrierDraftKey(subject, group)
+    return tostring(subject) .. ":" .. tostring(group)
+end
+
+function menu.savedCarrierWing(subject, group)
+    if menu.carrierWingEvidenceValid ~= true then return nil, "UNKNOWN - REFRESH SAVED WING EVIDENCE" end
+    for _, row in ipairs(menu.strategicRecords.carrierwings or {}) do
+        if row[2] == subject and row[3] == group then return row, "SAVED" end
+    end
+    return nil, "NO SAVED PROFILE FOR THIS GROUP"
+end
+
+function menu.carrierEditor(subject, group)
+    local saved, status = menu.savedCarrierWing(subject, group)
+    local key = menu.carrierDraftKey(subject, group)
+    menu.carrierDrafts = menu.carrierDrafts or {}
+    local draft = menu.carrierDrafts[key]
+    if not draft then
+        local count = 0
+        for _ in pairs(menu.carrierDrafts) do count = count + 1 end
+        if count >= 100 then return nil, saved, "100 DRAFT LIMIT - NO NEW EDITOR OPENED" end
+        draft = { role = "INTERCEPTOR", damage = 70, dirty = false }
+        menu.carrierDrafts[key] = draft
+    end
+    if not draft.dirty and not menu.carrierTransaction then
+        if saved then draft.role, draft.damage = saved[4], saved[5]
+        elseif menu.carrierWingEvidenceValid == true then draft.role, draft.damage = "INTERCEPTOR", 70 end
+    end
+    menu.strategic.wingRole, menu.strategic.damageHull = draft.role, draft.damage
+    local signature = status .. ":" .. tostring(saved and saved[5]) .. ":" .. draft.role .. ":" .. tostring(draft.damage) .. ":" .. tostring(draft.dirty)
+    if draft.logged ~= signature then
+        draft.logged = signature
+        DebugError("[FOC][B055][CARRIER_EDITOR] subject=" .. tostring(subject) .. " group=" .. tostring(group) .. " saved_role=" .. tostring(saved and saved[4] or "UNKNOWN") .. " saved_recall=" .. tostring(saved and saved[5] or "UNKNOWN") .. " draft_recall=" .. tostring(draft.damage) .. " dirty=" .. tostring(draft.dirty) .. " status=" .. status)
+    end
+    return draft, saved, status
+end
+
+function menu.requestCarrierProfile(selected, group, role, damage)
+    if menu.pendingActionKind or menu.carrierTransaction then return end
+    local commander = selected and selected.commander and bridgeComponent64(selected.commander.object)
+    local luaid = commander and componentLuaID(commander)
+    if not luaid then rejectLocal("CARRIER BLOCKED - EXACT COMPONENT IS NO LONGER VALID"); return end
+    menu.carrierTransactionCounter = (menu.carrierTransactionCounter or 0) + 1
+    local token = tostring(getElapsedTime()) .. ":" .. tostring(menu.carrierTransactionCounter)
+    menu.carrierTransaction = { token = token, component = commander, luaid = luaid, subject = selected.commander.idcode, group = group, role = role, damage = damage, phase = "PREFLIGHT" }
+    menu.strategicAction("CARRIER_PROFILE_PREFLIGHT", selected.commander.idcode, { group, role, damage, "PREFLIGHT", luaid, token })
+end
+
+function menu.carrierReplyValue(field, value)
+    menu.carrierReply = menu.carrierReply or {}
+    menu.carrierReply[field] = value
+end
+
+function menu.carrierGroupSignature(commander, group)
+    local members = {}
+    local subordinates = directSubordinates(commander)
+    if #subordinates > 500 then return nil end
+    for _, member in ipairs(subordinates) do
+        if tonumber(GetComponentData(member, "subordinategroup")) == group then members[#members + 1] = tostring(member) end
+    end
+    table.sort(members)
+    return table.concat(members, ":")
+end
+
+function menu.rollbackCarrier(transaction)
+    local saved = transaction.rollback
+    if not saved then return "NOT NEEDED - NO NATIVE WRITE" end
+    local commander = bridgeComponent64(saved.commander)
+    if not commander or GetComponentData(commander, "isplayerowned") ~= true then return "BLOCKED - CARRIER NO LONGER VALID/OWNED" end
+    if menu.carrierGroupSignature(commander, saved.group) ~= saved.members then return "BLOCKED - GROUP MEMBERSHIP CHANGED; NEWER HIERARCHY PRESERVED" end
+    local assignment = ffi.string(C.GetSubordinateGroupAssignment(commander, saved.group))
+    local dock = C.ShouldSubordinateGroupDockAtCommander(commander, saved.group)
+    local resupply = C.ShouldSubordinateGroupResupplyAtFleet(commander, saved.group)
+    if assignment == saved.assignment and dock == saved.dock and resupply == saved.resupply then return "CONFIRMED" end
+    if assignment ~= saved.expectedassignment or dock ~= saved.expecteddock or resupply ~= true then
+        return "BLOCKED - GROUP CHANGED AFTER REQUEST; NEWER SETTINGS PRESERVED"
+    end
+    C.SetSubordinateGroupAssignment(commander, saved.group, saved.assignment)
+    C.SetSubordinateGroupDockAtCommander(commander, saved.group, saved.dock)
+    C.SetSubordinateGroupResupplyAtFleet(commander, saved.group, saved.resupply)
+    local restored = ffi.string(C.GetSubordinateGroupAssignment(commander, saved.group)) == saved.assignment
+        and C.ShouldSubordinateGroupDockAtCommander(commander, saved.group) == saved.dock
+        and C.ShouldSubordinateGroupResupplyAtFleet(commander, saved.group) == saved.resupply
+    return restored and "CONFIRMED" or "FAILED - NATIVE READBACK MISMATCH"
+end
+
+function menu.carrierReplyComplete()
+    local reply, transaction = menu.carrierReply, menu.carrierTransaction
+    menu.carrierReply = nil
+    if not reply or not transaction or tostring(reply.token or "") ~= transaction.token then return end
+    local state = (reply.state ~= nil and reply.result ~= nil) and tostring(reply.state) or "BLOCKED"
+    local result = tostring(reply.result or "CARRIER RESPONSE INCOMPLETE")
+    if state == "CARRIER_PREFLIGHT_READY" and transaction.phase == "PREFLIGHT" then
+        if not menu.frame or (menu.plan.authority ~= "APPLY APPROVED PLAN" and menu.plan.authority ~= "FULL AUTOMATION") then
+            state, result = "BLOCKED", "CARRIER BLOCKED - MENU CLOSED OR AUTHORITY CHANGED AFTER PREFLIGHT | NOTHING CHANGED"
+        else
+            sampleFleets("CARRIER PREFLIGHT REVALIDATION")
+            local current
+            for _, fleet in ipairs(menu.sample.fleets or {}) do
+                local component = fleet.commander and bridgeComponent64(fleet.commander.object)
+                if component and tostring(component) == tostring(transaction.component) then current = fleet; break end
+            end
+            transaction.phase = "NATIVE"
+            local called, ok, detail = pcall(menu.applyWingGroup, current, transaction.group, transaction.role)
+            if called and ok then
+                transaction.phase = "SAVE"
+                menu.pendingActionKind = nil
+                menu.strategicAction("CARRIER_PROFILE_SAVE", transaction.subject, { transaction.group, transaction.role, transaction.damage, "CONFIRMED", transaction.luaid, transaction.token })
+                return
+            end
+            state, result = "BLOCKED", called and tostring(detail) or "CARRIER NATIVE CALL FAILED"
+        end
+    elseif state == "CARRIER_PREFLIGHT_READY" then
+        return
+    elseif transaction.phase == "PREFLIGHT" and state == "CARRIER_PROFILE_SAVED" then
+        return
+    end
+    if state ~= "CARRIER_PROFILE_SAVED" and transaction.rollback then
+        local ok, rollback = pcall(menu.rollbackCarrier, transaction)
+        result = result .. " | ROLLBACK " .. (ok and tostring(rollback) or "UNKNOWN - NATIVE CALL FAILED")
+    end
+    if state == "CARRIER_PROFILE_SAVED" and menu.carrierDrafts then
+        local draft = menu.carrierDrafts[menu.carrierDraftKey(transaction.subject, transaction.group)]
+        if draft and draft.damage == transaction.damage and draft.role == transaction.role then
+            draft.role, draft.damage, draft.dirty = transaction.role, transaction.damage, false
+        end
+    end
+    menu.carrierTransaction = nil
+    menu.pendingActionKind = nil
+    menu.plan.lastState, menu.plan.lastResult, menu.notice = state, result, result
+    DebugError("[FOC][B055][CARRIER_RESULT] token=" .. transaction.token .. " subject=" .. tostring(transaction.subject) .. " state=" .. state .. " result=" .. result)
+    if menu.frame then sampleFleets("CARRIER FINAL READBACK"); rebuild(false) end
+end
+
+function menu.applyWingGroup(selected, group, role)
+    local assignment = wingAssignments[role]
+    local commander, groups = fleetSubordinateGroups(selected)
+    local validgroup = false
+    for _, value in ipairs(groups) do if value == group then validgroup = true; break end end
+    if not commander or not validgroup or not assignment or not selected or selected.missionProtected or selected.commander.playerOccupied or GetComponentData(commander, "isplayerowned") ~= true or GetComponentData(commander, "shiptype") ~= "carrier" then
+        return false, "BLOCKED - CARRIER/GROUP OWNERSHIP, PROTECTION, OR PLAYER-CONTROL GUARD FAILED"
+    end
+    local oldassignment = ffi.string(C.GetSubordinateGroupAssignment(commander, group))
+    local olddock = C.ShouldSubordinateGroupDockAtCommander(commander, group)
+    local oldresupply = C.ShouldSubordinateGroupResupplyAtFleet(commander, group)
+    local wantdock = role == "RESERVE"
+    local signature = menu.carrierGroupSignature(commander, group)
+    if not signature or signature == "" then return false, "BLOCKED - GROUP EMPTY OR CARRIER EXCEEDS 500 DIRECT-MEMBER SAFETY BOUND" end
+    if menu.carrierTransaction then
+        menu.carrierTransaction.rollback = { commander = commander, group = group, assignment = oldassignment, dock = olddock, resupply = oldresupply, expectedassignment = assignment, expecteddock = wantdock, members = signature }
+    end
+    C.SetSubordinateGroupAssignment(commander, group, assignment)
+    C.SetSubordinateGroupResupplyAtFleet(commander, group, true)
+    C.SetSubordinateGroupDockAtCommander(commander, group, wantdock)
+    local newassignment = ffi.string(C.GetSubordinateGroupAssignment(commander, group))
+    local newdock = C.ShouldSubordinateGroupDockAtCommander(commander, group)
+    local newresupply = C.ShouldSubordinateGroupResupplyAtFleet(commander, group)
+    if newassignment ~= assignment or newdock ~= wantdock or newresupply ~= true then
+        C.SetSubordinateGroupAssignment(commander, group, oldassignment)
+        C.SetSubordinateGroupResupplyAtFleet(commander, group, oldresupply)
+        C.SetSubordinateGroupDockAtCommander(commander, group, olddock)
+        local restored = ffi.string(C.GetSubordinateGroupAssignment(commander, group)) == oldassignment and C.ShouldSubordinateGroupDockAtCommander(commander, group) == olddock and C.ShouldSubordinateGroupResupplyAtFleet(commander, group) == oldresupply
+        return false, "BLOCKED - NATIVE WING READBACK FAILED | ROLLBACK " .. (restored and "CONFIRMED" or "UNKNOWN")
+    end
+    return true, "NATIVE WING ROLE CONFIRMED - GROUP " .. tostring(group) .. " | " .. role .. " | ASSIGNMENT " .. assignment .. " | DOCK " .. (wantdock and "YES" or "NO") .. " | RESUPPLY AT FLEET YES"
+end
+
+function menu.supplyEvidence(component)
+    local result = { count = 0, deficit = 0, current = 0, total = 0, budget = nil, wares = {} }
+    if not component then return result end
+    local ok, count = pcall(C.GetNumSupplyOrderResources, component)
+    if not ok then return result end
+    result.count = tonumber(count) or 0
+    if result.count > 0 then
+        local buffer = ffi.new("SupplyResourceInfo[?]", result.count)
+        local readok, actual = pcall(C.GetSupplyOrderResources, buffer, result.count, component)
+        if readok then
+            for index = 0, (tonumber(actual) or 0) - 1 do
+                local total, current = tonumber(buffer[index].total) or 0, tonumber(buffer[index].current) or 0
+                result.total = result.total + total
+                result.current = result.current + current
+                result.deficit = result.deficit + math.max(0, total - current)
+                local ware = buffer[index].ware ~= nil and ffi.string(buffer[index].ware) or "UNKNOWN"
+                local supplytypes = buffer[index].supplytypes ~= nil and ffi.string(buffer[index].supplytypes) or "UNKNOWN"
+                result.wares[#result.wares + 1] = { ware = ware, supplytypes = supplytypes, current = current, total = total, deficit = math.max(0, total - current) }
+            end
+        end
+    end
+    local budgetok, budget = pcall(C.GetSupplyBudget, component)
+    if budgetok then result.budget = tonumber(budget) and tonumber(budget) / 100 or nil end
+    return result
+end
+
+function menu.carrierPage(tableWidget)
+    local selected = menu.strategicFleet(menu.selectedFleet)
+    section(tableWidget, "CARRIER AIR-WING MANAGER")
+    for index = 1, math.min(3, #(menu.strategicRecords.carriers or {})) do local row = menu.strategicRecords.carriers[index]; textRow(tableWidget, "Saved carrier " .. tostring(index), tostring(row[3]) .. " | " .. tostring(row[4]) .. " WING(S) | " .. tostring(row[5]), neutralColor) end
+    textRow(tableWidget, "Native boundary", "Roles are X4 assignments. RESERVE is X4 dock-at-commander. Every write is read back; a mismatch restores the prior assignment and dock state.", passColor)
+    if not selected then textRow(tableWidget, "Carrier", "BLOCKED - CHOOSE A FLEET ON THE FLEETS PAGE", warningColor); return end
+    textRow(tableWidget, "Selected fleet", selected.commander.fleetname .. " | " .. selected.commander.name .. " | TYPE " .. selected.commander.shiptype, headingColor)
+    if selected.commander.shiptype ~= "carrier" then textRow(tableWidget, "Carrier proof", "BLOCKED - THE SELECTED COMMANDER IS NOT AN X4 CARRIER", warningColor); return end
+    local commander, groups = fleetSubordinateGroups(selected)
+    if not commander or #groups == 0 then textRow(tableWidget, "Wing groups", "BLOCKED - NO DIRECT X4 SUBORDINATE GROUP", warningColor); return end
+    local selectedGroupExists = false
+    for _, group in ipairs(groups) do if group == menu.strategic.group then selectedGroupExists = true; break end end
+    if not selectedGroupExists then menu.strategic.group = groups[1] end
+    local draft, saved, status = menu.carrierEditor(selected.commander.idcode, menu.strategic.group)
+    if not draft then textRow(tableWidget, "Carrier draft", status, warningColor); return end
+    dropdownRow(tableWidget, "Direct group", groups, menu.strategic.group, function(value) menu.strategic.group = tonumber(value) or groups[1] end)
+    dropdownRow(tableWidget, "Wing role", wingRoles, menu.strategic.wingRole, function(value) draft.role = tostring(value); draft.dirty = true; menu.strategic.wingRole = draft.role end)
+    dropdownRow(tableWidget, "Damage recall", damageOptions, menu.strategic.damageHull, function(value) draft.damage = tonumber(value) or draft.damage; draft.dirty = true; menu.strategic.damageHull = draft.damage end, "% hull")
+    textRow(tableWidget, "Saved wing", saved and (selected.commander.idcode .. " | GROUP " .. tostring(saved[3]) .. " | " .. saved[4] .. " | RECALL " .. tostring(saved[5]) .. "%") or status, saved and passColor or warningColor)
+    textRow(tableWidget, "Editor", draft.dirty and "UNSAVED EDIT - APPLY TO SAVE; REFRESH AND MAP BACK KEEP THIS DRAFT" or (saved and "MATCHES SAVED PROFILE" or (menu.carrierWingEvidenceValid == true and "NEW DRAFT - DEFAULTS ARE NOT SAVED SETTINGS" or "SAVED SETTINGS UNKNOWN - APPLY AND RECALL BLOCKED")), draft.dirty and warningColor or neutralColor)
+    local currentassignment = ffi.string(C.GetSubordinateGroupAssignment(commander, menu.strategic.group))
+    local currentdock = C.ShouldSubordinateGroupDockAtCommander(commander, menu.strategic.group)
+    textRow(tableWidget, "Native readback", "GROUP " .. tostring(menu.strategic.group) .. " | ASSIGNMENT " .. safeText(currentassignment, "UNKNOWN") .. " | DOCK AT CARRIER " .. (currentdock and "YES" or "NO"), neutralColor)
+    actionRow(tableWidget, "Apply role", "APPLY TO THIS EXACT X4 GROUP AND SAVE PROFILE", function()
+        menu.requestCarrierProfile(selected, menu.strategic.group, menu.strategic.wingRole, menu.strategic.damageHull)
+    end, menu.carrierWingEvidenceValid == true and not menu.pendingActionKind and not selected.missionProtected and not selected.commander.playerOccupied, passColor)
+    actionRow(tableWidget, "Recover wing", "RECALL THIS GROUP - ENABLE NATIVE DOCK AT COMMANDER", function()
+        menu.requestCarrierProfile(selected, menu.strategic.group, "RESERVE", menu.strategic.damageHull)
+    end, menu.carrierWingEvidenceValid == true and not menu.pendingActionKind and not selected.missionProtected and not selected.commander.playerOccupied, warningColor)
+    local damaged = 0
+    for _, member in ipairs(selected.members) do if member.hull and member.hull <= menu.strategic.damageHull then damaged = damaged + 1 end end
+    textRow(tableWidget, "Recovery evidence", tostring(damaged) .. " SHIP(S) AT/BELOW " .. tostring(menu.strategic.damageHull) .. "% HULL | UNKNOWN HULL NEVER COUNTS READY", damaged > 0 and warningColor or passColor)
+end
+
+function menu.defenseGridPage(tableWidget)
+    section(tableWidget, "SECTOR DEFENSE GRID")
+    for index = 1, math.min(3, #(menu.strategicRecords.grids or {})) do local row = menu.strategicRecords.grids[index]; textRow(tableWidget, "Saved grid " .. tostring(index), "TASK FORCE " .. tostring(row[2]) .. " | " .. tostring(row[3]) .. " | RESERVE " .. tostring(row[4]) .. "/10 | " .. tostring(row[5]), neutralColor) end
+    textRow(tableWidget, "Command model", "Uses saved Task Force members and Home posts. Dispatch is a bounded named ProtectPosition response; return cancels only retained FOC orders.", passColor)
+    if #menu.taskForces == 0 then textRow(tableWidget, "Task Force", "BLOCKED - CREATE A TASK FORCE FIRST", warningColor); return end
+    menu.taskForce.selected = clamp(menu.taskForce.selected, 1, #menu.taskForces)
+    local labels = {}
+    for index, force in ipairs(menu.taskForces) do labels[index] = tostring(force[2]) .. " [" .. tostring(force[1]) .. "]" end
+    dropdownRow(tableWidget, "Task Force", labels, labels[menu.taskForce.selected], function(value) for i, label in ipairs(labels) do if label == value then menu.taskForce.selected = i; return end end end)
+    dropdownRow(tableWidget, "Grid range", coverageRanges, menu.strategic.defenseRange, function(value) menu.strategic.defenseRange = normalizeCoverage(value) end)
+    dropdownRow(tableWidget, "Reserve escalation", urgencyOptions, menu.strategic.reserveThreshold, function(value) menu.strategic.reserveThreshold = tonumber(value) or 7 end, " / 10 urgency")
+    local force = menu.taskForces[menu.taskForce.selected]
+    textRow(tableWidget, "Coverage", tostring(#(force[9] or {})) .. " FLEET(S) | ACTIVE " .. safeText(force[7], "NOT SET") .. " | RESERVE " .. safeText(force[8], "NOT SET"), neutralColor)
+    actionRow(tableWidget, "Save grid", "SAVE EXACT TASK FORCE, RANGE, AND RESERVE THRESHOLD", function() menu.strategicAction("DEFENSE_GRID_SAVE", tostring(force[1]), { menu.strategic.defenseRange, menu.strategic.reserveThreshold }) end, not menu.pendingActionKind, passColor)
+    buttonPairRow(tableWidget,
+        "APPROVE CURRENT-INCIDENT DISPATCH", function() menu.strategicAction("DEFENSE_GRID_DISPATCH", tostring(force[1]), {}) end,
+        "RETURN GRID FLEETS TO SAVED POSTS", function() menu.strategicAction("DEFENSE_GRID_RETURN", tostring(force[1]), {}) end,
+        warningColor, not menu.pendingActionKind, not menu.pendingActionKind)
+end
+
+function menu.convoyPage(tableWidget)
+    section(tableWidget, "CONVOY ESCORT OPERATIONS")
+    for index = 1, math.min(3, #(menu.strategicRecords.convoys or {})) do local row = menu.strategicRecords.convoys[index]; textRow(tableWidget, "Convoy " .. tostring(index), tostring(row[2]) .. " + " .. tostring(row[3]) .. " | " .. tostring(row[4]), neutralColor) end
+    textRow(tableWidget, "Civilian boundary", "FOC never changes the miner/trader order. It temporarily attaches one exact escort as X4 DEFENCE and restores the prior escort hierarchy after release.", passColor)
+    local civilians = {}
+    for _, row in ipairs(menu.strategicAssets or {}) do if row.kind == "CIVILIAN" then civilians[#civilians + 1] = row end end
+    if #civilians == 0 or not menu.sample or #menu.sample.fleets == 0 then textRow(tableWidget, "Eligibility", "BLOCKED - REFRESH MUST PROVE A PLAYER MINER/TRADER AND AN ESCORT FLEET", warningColor); return end
+    menu.strategic.assetChoice = clamp(menu.strategic.assetChoice, 1, #civilians)
+    menu.strategic.secondaryChoice = clamp(menu.strategic.secondaryChoice, 1, #menu.sample.fleets)
+    local civilianLabels, escortLabels = {}, {}
+    for i, row in ipairs(civilians) do civilianLabels[i] = row.name .. " [" .. row.idcode .. "] | " .. row.sector end
+    for i, fleet in ipairs(menu.sample.fleets) do escortLabels[i] = fleet.commander.fleetname .. " [" .. fleet.commander.idcode .. "]" end
+    dropdownRow(tableWidget, "Protected civilian", civilianLabels, civilianLabels[menu.strategic.assetChoice], function(value) for i, label in ipairs(civilianLabels) do if label == value then menu.strategic.assetChoice = i; return end end end)
+    dropdownRow(tableWidget, "Escort fleet", escortLabels, escortLabels[menu.strategic.secondaryChoice], function(value) for i, label in ipairs(escortLabels) do if label == value then menu.strategic.secondaryChoice = i; return end end end)
+    local civilian, escort = civilians[menu.strategic.assetChoice], menu.sample.fleets[menu.strategic.secondaryChoice]
+    textRow(tableWidget, "Trip evidence", civilian.order ~= "UNKNOWN" and ("CURRENT CIVILIAN ORDER " .. civilian.order .. " | EXACT ORDER CAPTURE REQUIRED") or "BLOCKED - CURRENT CIVILIAN ORDER UNKNOWN", civilian.order ~= "UNKNOWN" and neutralColor or warningColor)
+    buttonPairRow(tableWidget,
+        "ATTACH ESCORT - NATIVE DEFENCE", function() menu.strategicAction("CONVOY_ATTACH", civilian.idcode, { escort.commander.idcode }) end,
+        "RELEASE AND RESTORE ESCORT", function() menu.strategicAction("CONVOY_RELEASE", civilian.idcode, {}) end,
+        warningColor, civilian.order ~= "UNKNOWN" and not menu.pendingActionKind, not menu.pendingActionKind)
+end
+
+function menu.logisticsPage(tableWidget)
+    section(tableWidget, "MOBILE LOGISTICS FLEET")
+    for index = 1, math.min(3, #(menu.strategicRecords.logistics or {})) do local row = menu.strategicRecords.logistics[index]; textRow(tableWidget, "Logistics " .. tostring(index), tostring(row[2]) .. " -> " .. tostring(row[3]) .. " | " .. tostring(row[4]), neutralColor) end
+    textRow(tableWidget, "Authority", "FOC can attach a proven auxiliary with native SUPPLY FLEET assignment. It does not buy supplies, spend credits, or transfer cargo.", passColor)
+    local suppliers = {}
+    for _, row in ipairs(menu.strategicAssets or {}) do if row.kind == "RESUPPLIER" then suppliers[#suppliers + 1] = row end end
+    if #suppliers == 0 or not menu.sample or #menu.sample.fleets == 0 then textRow(tableWidget, "Eligibility", "BLOCKED - REFRESH MUST PROVE AN AUXILIARY AND A TARGET FLEET", warningColor); return end
+    menu.strategic.assetChoice = clamp(menu.strategic.assetChoice, 1, #suppliers)
+    menu.strategic.secondaryChoice = clamp(menu.strategic.secondaryChoice, 1, #menu.sample.fleets)
+    local supplierLabels, targetLabels = {}, {}
+    for i, row in ipairs(suppliers) do supplierLabels[i] = row.name .. " [" .. row.idcode .. "] | " .. row.sector end
+    for i, fleet in ipairs(menu.sample.fleets) do targetLabels[i] = fleet.commander.fleetname .. " [" .. fleet.commander.idcode .. "]" end
+    dropdownRow(tableWidget, "Auxiliary", supplierLabels, supplierLabels[menu.strategic.assetChoice], function(value) for i, label in ipairs(supplierLabels) do if label == value then menu.strategic.assetChoice = i; return end end end)
+    dropdownRow(tableWidget, "Supported fleet", targetLabels, targetLabels[menu.strategic.secondaryChoice], function(value) for i, label in ipairs(targetLabels) do if label == value then menu.strategic.secondaryChoice = i; return end end end)
+    local supplier, target = suppliers[menu.strategic.assetChoice], menu.sample.fleets[menu.strategic.secondaryChoice]
+    local evidence = menu.supplyEvidence(bridgeComponent64(target.commander.object))
+    textRow(tableWidget, "Supply resources", tostring(evidence.count) .. " WARE(S) | CURRENT " .. tostring(evidence.current) .. " / " .. tostring(evidence.total) .. " | DEFICIT " .. tostring(evidence.deficit), evidence.deficit > 0 and warningColor or passColor)
+    for index = 1, math.min(6, #evidence.wares) do
+        local ware = evidence.wares[index]
+        textRow(tableWidget, "Native ware " .. tostring(index), string.upper(ware.ware) .. " | " .. string.upper(ware.supplytypes) .. " | " .. tostring(ware.current) .. " / " .. tostring(ware.total) .. " | SHORT " .. tostring(ware.deficit), ware.deficit > 0 and warningColor or neutralColor)
+    end
+    textRow(tableWidget, "Native budget", evidence.budget and ("ESTIMATED SUPPLY BUDGET " .. ConvertMoneyString(evidence.budget, false, true, 0, true) .. " | INFORMATION ONLY - NOT A QUOTE OR APPROVAL") or "UNKNOWN - BUDGET READBACK UNAVAILABLE", evidence.budget and neutralColor or warningColor)
+    textRow(tableWidget, "Compatibility boundary", "AMMO / CONSUMABLES ARE REPORTED ONLY WHEN X4 EXPOSES THEM AS SUPPLY WARES. TRADER, BLUEPRINT, AND EQUIPMENT COMPATIBILITY REMAIN UNKNOWN; FOC WILL NOT PURCHASE OR TRANSFER THEM.", warningColor)
+    buttonPairRow(tableWidget,
+        "ASSIGN AUXILIARY TO SUPPLY FLEET", function() menu.strategicAction("LOGISTICS_ATTACH", supplier.idcode, { target.commander.idcode }) end,
+        "RELEASE AUXILIARY", function() menu.strategicAction("LOGISTICS_RELEASE", supplier.idcode, {}) end,
+        warningColor, not menu.pendingActionKind, not menu.pendingActionKind)
+end
+
+function menu.assaultPage(tableWidget)
+    section(tableWidget, "COORDINATED ASSAULT GROUP")
+    for index = 1, math.min(3, #(menu.strategicRecords.assaults or {})) do local row = menu.strategicRecords.assaults[index]; textRow(tableWidget, "Assault " .. tostring(index), "TASK FORCE " .. tostring(row[2]) .. " | " .. tostring(row[3]) .. " -> " .. tostring(row[4]) .. " | " .. tostring(row[5]), neutralColor) end
+    textRow(tableWidget, "Order model", "Rally uses named MoveWait orders. Launch uses named Attack orders against one exact map-picked target. Abort cancels only retained current FOC orders.", passColor)
+    if #menu.taskForces == 0 then textRow(tableWidget, "Task Force", "BLOCKED - CREATE A TASK FORCE FIRST", warningColor); return end
+    menu.taskForce.selected = clamp(menu.taskForce.selected, 1, #menu.taskForces)
+    local labels = {}
+    for index, force in ipairs(menu.taskForces) do labels[index] = tostring(force[2]) .. " [" .. tostring(force[1]) .. "]" end
+    dropdownRow(tableWidget, "Task Force", labels, labels[menu.taskForce.selected], function(value) for i, label in ipairs(labels) do if label == value then menu.taskForce.selected = i; return end end end)
+    dropdownRow(tableWidget, "Minimum readiness", { 50, 60, 70, 80, 90, 100 }, menu.strategic.minimumReadiness, function(value) menu.strategic.minimumReadiness = tonumber(value) or 80 end, "%")
+    actionRow(tableWidget, "Rally point", menu.strategic.rally and ("MARKED " .. menu.strategic.rally.name .. " | " .. table.concat(menu.strategic.rally.position, ", ")) or "CHOOSE EXACT RALLY POINT ON FOC MAP", function() menu.openStrategicMap("ASSAULT_RALLY") end, not menu.pendingActionKind, headingColor)
+    actionRow(tableWidget, "Attack target", menu.strategic.target and (menu.strategic.target.name .. " [" .. menu.strategic.target.id .. "]") or "CHOOSE EXACT ATTACKABLE TARGET ON FOC MAP", function() menu.openStrategicMap("ASSAULT_TARGET") end, not menu.pendingActionKind, headingColor)
+    local force = menu.taskForces[menu.taskForce.selected]
+    actionRow(tableWidget, "Save assault", "SAVE TASK FORCE, RALLY, TARGET, AND READINESS", function()
+        menu.strategicAction("ASSAULT_SAVE", tostring(force[1]), { menu.strategic.minimumReadiness, menu.strategic.rally and menu.strategic.rally.id or "", menu.strategic.rally and menu.strategic.rally.position or {}, menu.strategic.target and menu.strategic.target.id or "" })
+    end, menu.strategic.rally ~= nil and menu.strategic.target ~= nil and not menu.pendingActionKind, passColor)
+    local members = force[9] or {}
+    if #members > 0 then
+        menu.strategic.assaultMemberChoice = clamp(menu.strategic.assaultMemberChoice, 1, #members)
+        dropdownRow(tableWidget, "Role fleet", members, members[menu.strategic.assaultMemberChoice], function(value) for i, member in ipairs(members) do if member == value then menu.strategic.assaultMemberChoice = i; return end end end)
+        dropdownRow(tableWidget, "Assault role", { "INTERCEPT", "BOMBARDMENT", "CAPITAL ASSAULT", "RESERVE" }, menu.strategic.assaultRole, function(value) menu.strategic.assaultRole = tostring(value) end)
+        actionRow(tableWidget, "Save role", "SAVE EXPLICIT ROLE FOR THIS FLEET; RESERVE RALLIES BUT DOES NOT LAUNCH", function() menu.strategicAction("ASSAULT_ROLE_SAVE", tostring(force[1]), { members[menu.strategic.assaultMemberChoice], menu.strategic.assaultRole }) end, not menu.pendingActionKind, headingColor)
+    end
+    buttonPairRow(tableWidget,
+        "RALLY GROUP", function() menu.strategicAction("ASSAULT_RALLY", tostring(force[1]), {}) end,
+        "LAUNCH WHEN READINESS MATCHES", function() menu.strategicAction("ASSAULT_LAUNCH", tostring(force[1]), {}) end,
+        warningColor, not menu.pendingActionKind, not menu.pendingActionKind)
+    actionRow(tableWidget, "Abort / withdraw", "ABORT RETAINED FOC ORDERS AND RETURN TO SAVED POSTS", function() menu.strategicAction("ASSAULT_ABORT", tostring(force[1]), {}) end, not menu.pendingActionKind, criticalColor)
+end
+
+function menu.taskForcesPage(tableWidget)
+    section(tableWidget, "STRATEGIC OPERATIONS")
+    dropdownRow(tableWidget, "Workspace", menu.strategicViews, menu.strategic.view, function(value) menu.strategic.view = tostring(value); rebuild(true) end)
+    actionRow(tableWidget, "Evidence", "REFRESH STRATEGIC EVIDENCE | " .. (menu.strategicSnapshotStatus or "NOT REFRESHED"), function() menu.strategicSnapshotStatus = "REQUESTED"; AddUITriggeredEvent(menu.name, "strategic_refresh", nil); rebuild(false) end, not menu.pendingActionKind, headingColor, true)
+    if menu.strategic.view == "TASK FORCES" then taskForcesLegacyPage(tableWidget)
+    elseif menu.strategic.view == "CARRIER AIR WINGS" then
+        menu.carrierPage(tableWidget)
+        local selected = menu.strategicFleet(menu.selectedFleet)
+        local key = selected and fleetKey(selected)
+        actionRow(tableWidget, "Inspect live fleet", "SHOW SELECTED FLEET / SHIP IN X4 MAP", function() menu.openFleetInspection(key) end,
+            key ~= nil and not menu.pendingActionKind and not menu.carrierTransaction, headingColor, true)
+    elseif menu.strategic.view == "SECTOR DEFENSE GRID" then menu.defenseGridPage(tableWidget)
+    elseif menu.strategic.view == "CONVOY ESCORT" then menu.convoyPage(tableWidget)
+    elseif menu.strategic.view == "MOBILE LOGISTICS" then menu.logisticsPage(tableWidget)
+    else menu.assaultPage(tableWidget) end
 end
 
 function menu.applyPreset(orders, preset)
@@ -2907,7 +3384,9 @@ function menu.refresh(preserveScroll)
     menu.create()
 end
 
-function menu.onShowMenu()
+function menu.onShowMenu(state)
+    -- Native Helper return must not replay the older MD launch snapshot over drafts.
+    if menu.restoreFleetInspection(state) then return end
     menu.param = menu.param or {}
     menu.param[1] = tonumber(menu.param[1]) or 0
     menu.param[2] = tonumber(menu.param[2]) or 0
@@ -2983,6 +3462,8 @@ function menu.onShowMenu()
         end
         menu.restoreFleetKey = nil
     end
+    AddUITriggeredEvent(menu.name, "strategic_refresh", nil)
+    if menu.page == "taskforces" and menu.plan.lastResult then menu.notice = menu.plan.lastResult end
     menu.create()
 end
 
@@ -2996,6 +3477,129 @@ function menu.onCloseElement(reason, layer)
 end
 
 function menu.onUpdate() end
+
+function menu.strategicSnapshotBegin()
+    menu.strategicIncoming = { assets = {}, observations = {}, records = { carriers = {}, carrierwings = {}, grids = {}, convoys = {}, logistics = {}, assaults = {} }, wingKeys = {}, wingInvalid = false, asset = nil, observation = nil, record = nil }
+end
+
+function menu.strategicAssetBegin()
+    if menu.strategicIncoming then menu.strategicIncoming.asset = {} end
+end
+function menu.strategicAssetValue(field, value)
+    if menu.strategicIncoming and menu.strategicIncoming.asset then menu.strategicIncoming.asset[field] = value end
+end
+function menu.strategicAssetCommit()
+    if not menu.strategicIncoming then return end
+    local row = menu.strategicIncoming.asset
+    menu.strategicIncoming.asset = nil
+    if not row or not row.component or not row.idcode or row.idcode == "" or not row.kind or not row.name then return end
+    menu.strategicIncoming.assets[#menu.strategicIncoming.assets + 1] = {
+        kind = tostring(row.kind), component = row.component, idcode = tostring(row.idcode), name = tostring(row.name),
+        purpose = tostring(row.purpose or "UNKNOWN"), sector = tostring(row.sector or "UNKNOWN"), order = tostring(row.order or "UNKNOWN"),
+        commander = tostring(row.commander or ""), hull = tonumber(row.hull), shield = tonumber(row.shield),
+    }
+end
+function menu.strategicObservationBegin()
+    if menu.strategicIncoming then menu.strategicIncoming.observation = {} end
+end
+function menu.strategicObservationValue(field, value)
+    if menu.strategicIncoming and menu.strategicIncoming.observation then menu.strategicIncoming.observation[field] = value end
+end
+function menu.strategicObservationCommit()
+    if not menu.strategicIncoming then return end
+    local row = menu.strategicIncoming.observation
+    menu.strategicIncoming.observation = nil
+    if not row or not row.kind or row.time == nil or not row.sector or not row.sectorid or not row.subject or row.amount == nil or row.severity == nil or row.detail == nil then return end
+    menu.strategicIncoming.observations[#menu.strategicIncoming.observations + 1] = {
+        kind = tostring(row.kind), time = tonumber(row.time) or 0, sector = tostring(row.sector), sectorid = tostring(row.sectorid),
+        subject = tostring(row.subject), amount = tonumber(row.amount) or 0, severity = tonumber(row.severity) or 0, detail = tostring(row.detail),
+    }
+end
+function menu.strategicRecordBegin()
+    if menu.strategicIncoming then menu.strategicIncoming.record = {} end
+end
+function menu.strategicRecordValue(index, value)
+    if menu.strategicIncoming and menu.strategicIncoming.record then menu.strategicIncoming.record[index] = value end
+end
+function menu.strategicRecordCommit()
+    if not menu.strategicIncoming then return end
+    local row = menu.strategicIncoming.record
+    menu.strategicIncoming.record = nil
+    if not row then return end
+    local bucket = tostring(row[1] or "")
+    local target = menu.strategicIncoming.records[bucket]
+    if bucket == "carrierwings" then
+        local group, damage = tonumber(row[3]), tonumber(row[5])
+        local key = menu.carrierDraftKey(row[2], group)
+        if type(row[2]) ~= "string" or row[2] == "" or not group or group % 1 ~= 0 or group < 1 or group > 10
+            or not damage or damage % 1 ~= 0 or damage < 1 or damage > 100 or not wingAssignments[row[4]]
+            or row[6] ~= wingAssignments[row[4]] or menu.strategicIncoming.wingKeys[key] or #target >= 100 then
+            menu.strategicIncoming.wingInvalid = true
+            return
+        end
+        row[3], row[5] = group, damage
+        menu.strategicIncoming.wingKeys[key] = true
+    end
+    if target and row[2] ~= nil and row[3] ~= nil and row[4] ~= nil and row[5] ~= nil then target[#target + 1] = row end
+end
+
+function menu.strategicSnapshotComplete()
+    if not menu.strategicIncoming then return end
+    local incoming = menu.strategicIncoming
+    if incoming.wingInvalid == false then
+        local counts = {}
+        for _, row in ipairs(incoming.records.carrierwings or {}) do counts[row[2]] = (counts[row[2]] or 0) + 1 end
+        for _, row in ipairs(incoming.records.carriers or {}) do
+            if tonumber(row[4]) ~= (counts[row[2]] or 0) then incoming.wingInvalid = true end
+            counts[row[2]] = nil
+        end
+        if next(counts) then incoming.wingInvalid = true end
+    end
+    menu.strategicAssets = menu.strategicIncoming.assets
+    menu.strategicObservations = menu.strategicIncoming.observations
+    menu.strategicRecords = menu.strategicIncoming.records
+    menu.carrierWingEvidenceValid = menu.strategicIncoming.wingInvalid == false
+    menu.strategicIncoming = nil
+    menu.strategicSnapshotStatus = tostring(#menu.strategicAssets) .. " ASSET(S) | " .. tostring(#menu.strategicObservations) .. " OBSERVATION(S)"
+    if menu.frame then rebuild(false) end
+end
+function menu.carrierAutomation(_, value)
+    if type(value) ~= "table" then return end
+    local carrier = bridgeComponent64(value[1])
+    local group = tonumber(value[2])
+    local assignment = tostring(value[3] or "defence")
+    local action = tostring(value[4] or "RECALL")
+    local success = false
+    if carrier and group and group >= 1 and group <= 10 then
+        local oldassignment = ffi.string(C.GetSubordinateGroupAssignment(carrier, group))
+        local olddock = C.ShouldSubordinateGroupDockAtCommander(carrier, group)
+        local oldresupply = C.ShouldSubordinateGroupResupplyAtFleet(carrier, group)
+        if action == "LAUNCH" then C.SetSubordinateGroupAssignment(carrier, group, assignment) end
+        C.SetSubordinateGroupResupplyAtFleet(carrier, group, true)
+        C.SetSubordinateGroupDockAtCommander(carrier, group, action ~= "LAUNCH")
+        local newassignment = ffi.string(C.GetSubordinateGroupAssignment(carrier, group))
+        local newdock = C.ShouldSubordinateGroupDockAtCommander(carrier, group)
+        local newresupply = C.ShouldSubordinateGroupResupplyAtFleet(carrier, group)
+        success = newassignment == (action == "LAUNCH" and assignment or oldassignment) and newdock == (action ~= "LAUNCH") and newresupply == true
+        if not success then
+            C.SetSubordinateGroupAssignment(carrier, group, oldassignment)
+            C.SetSubordinateGroupDockAtCommander(carrier, group, olddock)
+            C.SetSubordinateGroupResupplyAtFleet(carrier, group, oldresupply)
+        end
+    end
+    AddUITriggeredEvent(menu.name, "carrier_automation_readback", { tostring(value[5] or ""), group or 0, action, assignment, success and "CONFIRMED" or "BLOCKED" })
+    DebugError("[FOC][B055][CARRIER_AUTOMATION] carrier=" .. tostring(value[1]) .. " group=" .. tostring(group) .. " action=" .. action .. " assignment=" .. assignment .. " readback=" .. (success and "CONFIRMED" or "BLOCKED"))
+end
+function menu.carrierAutomationBegin() menu.carrierAutomationIncoming = {} end
+function menu.carrierAutomationValue(index, value)
+    if menu.carrierAutomationIncoming then menu.carrierAutomationIncoming[index] = value end
+end
+function menu.carrierAutomationCommit()
+    local row = menu.carrierAutomationIncoming
+    menu.carrierAutomationIncoming = nil
+    if not row or row[1] == nil or tonumber(row[2]) == nil or row[3] == nil or row[4] == nil or row[5] == nil then return end
+    menu.carrierAutomation(nil, row)
+end
 function menu.onRowChanged() end
 function menu.onSelectElement() end
 function menu.viewCreated() end
@@ -3122,6 +3726,37 @@ local function init()
         RegisterEvent(menu.name .. ".store.snapshot.marine." .. tostring(capturedTier), function(_, value) storeMarineTier(capturedTier, value) end)
     end
     RegisterEvent(menu.name .. ".store.snapshot.complete", storeSnapshotComplete)
+    for _, field in ipairs({ "token", "state", "result" }) do
+        local capturedField = field
+        RegisterEvent(menu.name .. ".carrier.reply." .. field, function(_, value) menu.carrierReplyValue(capturedField, value) end)
+    end
+    RegisterEvent(menu.name .. ".carrier.reply.complete", menu.carrierReplyComplete)
+    RegisterEvent(menu.name .. ".strategic.snapshot.begin", menu.strategicSnapshotBegin)
+    RegisterEvent(menu.name .. ".strategic.asset.begin", menu.strategicAssetBegin)
+    for _, field in ipairs({ "kind", "component", "idcode", "name", "purpose", "sector", "order", "commander", "hull", "shield" }) do
+        local capturedField = field
+        RegisterEvent(menu.name .. ".strategic.asset." .. field, function(_, value) menu.strategicAssetValue(capturedField, value) end)
+    end
+    RegisterEvent(menu.name .. ".strategic.asset.commit", menu.strategicAssetCommit)
+    RegisterEvent(menu.name .. ".strategic.observation.begin", menu.strategicObservationBegin)
+    for _, field in ipairs({ "kind", "time", "sector", "sectorid", "subject", "amount", "severity", "detail" }) do
+        local capturedField = field
+        RegisterEvent(menu.name .. ".strategic.observation." .. field, function(_, value) menu.strategicObservationValue(capturedField, value) end)
+    end
+    RegisterEvent(menu.name .. ".strategic.observation.commit", menu.strategicObservationCommit)
+    RegisterEvent(menu.name .. ".strategic.record.begin", menu.strategicRecordBegin)
+    for index, field in ipairs({ "bucket", "p2", "p3", "p4", "p5", "p6" }) do
+        local capturedIndex = index
+        RegisterEvent(menu.name .. ".strategic.record." .. field, function(_, value) menu.strategicRecordValue(capturedIndex, value) end)
+    end
+    RegisterEvent(menu.name .. ".strategic.record.commit", menu.strategicRecordCommit)
+    RegisterEvent(menu.name .. ".strategic.snapshot.complete", menu.strategicSnapshotComplete)
+    RegisterEvent(menu.name .. ".carrier.automation.begin", menu.carrierAutomationBegin)
+    for index, field in ipairs({ "carrier", "group", "assignment", "action", "id" }) do
+        local capturedIndex = index
+        RegisterEvent(menu.name .. ".carrier.automation." .. field, function(_, value) menu.carrierAutomationValue(capturedIndex, value) end)
+    end
+    RegisterEvent(menu.name .. ".carrier.automation.commit", menu.carrierAutomationCommit)
 end
 
 init()
