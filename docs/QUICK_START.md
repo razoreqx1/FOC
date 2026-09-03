@@ -4,16 +4,18 @@
 
 Load a save, open the in-game Fleet Operations Command entry, and wait for its bounded inventory snapshot to complete.
 
-FOC contains eight focused pages:
+FOC contains ten focused pages:
 
 1. **Command** — global authority modes and emergency controls.
 2. **Fleets** — Home, patrol, distress, and selected-fleet deployment.
-3. **Readiness** — captain coverage, proven vacancies, and staffing previews.
-4. **Training Academy** — trainees, seminars, and exact assignments.
-5. **Academy Store** — approved training-supply purchases and verified inventory results.
-6. **Fleet Response** — distress incidents and eligible dispatch.
-7. **Activity** — requests, blockers, and native readback.
-8. **Settings** — persistent authority and safety behavior.
+3. **Task Forces** — save-backed active/reserve defense groups and bounded rotation.
+4. **Readiness** — captain coverage, proven vacancies, and staffing previews.
+5. **Training Academy** — trainees, seminars, and exact assignments.
+6. **Academy Store** — approved training-supply purchases and verified inventory results.
+7. **Fleet Response** — distress incidents and eligible dispatch.
+8. **Activity** — requests, blockers, and native readback.
+9. **Operations Map** — historical sector intelligence, saved Homes, fleet presence, readiness, and evidence-based route filters.
+10. **Settings** — persistent authority and safety behavior.
 
 ## Send a fleet on patrol
 
@@ -21,7 +23,7 @@ FOC contains eight focused pages:
 2. Select a player-owned combat fleet.
    Use the alphabetical **Fleet finder** when the list is long.
 3. Confirm its commander and captain evidence.
-4. Choose its Home sector and exact Home point.
+4. Select **Choose Home Point on Map**, then short-left-click the exact point on a player-known sector in FOC's dedicated map. Dragging pans; Escape cancels.
 5. Configure distress-response range.
 6. Configure ship/station response, distress scope, urgency, hull thresholds, and return behavior.
 7. Review the summary at the bottom of the page.
@@ -32,6 +34,18 @@ FOC can mark real next steps with `->`. Use the pinned **Clear Next-Step Pointer
 FOC saves and unlocks only that fleet, replaces only eligible current orders, starts a native Patrol or Protect Position default, and arms the configured distress response. It reports active only after X4 returns the intended native order identity.
 
 If FOC identifies a possible story or mission ship, read the exact-ship question carefully. Choose **Yes** while the ship is still part of a story or mission. Choose **No** only after that story or mission is finished. The answer changes FOC's protection for that ship; it never changes the game's story.
+
+## Inspect historical intelligence
+
+1. Open **Operations Map**.
+2. Hover a player-known sector cell to read retained risk, fleet presence, saved Homes, readiness, and recent observations.
+3. Use left-drag to pan, right-drag to rotate, and the mouse wheel to zoom.
+4. Select **Pirate Activity** to show routes adjacent to retained positively identified pirate attacks on player-owned assets.
+5. Select **Heavy Patrol Routes** to show observed adjacent-gate crossings by enrolled FOC fleet commanders.
+6. Read yellow, amber, and red as increasing retained evidence, not faction ownership or predicted danger.
+7. Select **Back to FOC** or press Escape when finished.
+
+No colored route means no qualifying observation inside the active window. It never means the route is proven safe.
 
 ## Understand results
 

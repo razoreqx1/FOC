@@ -4,5 +4,6 @@
     <dependency name="ego_detailmonitor" />
     <file name="ui/foc_menu.lua" />
     <file name="ui/foc_access.lua" />
+    <file name="ui/foc_operations_map.lua" />
   </environment>
 </addon>

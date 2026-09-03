@@ -1,22 +1,22 @@
-# Fleet Operations Command v1.39 - Complete Player Guide
+# Fleet Operations Command v1.49 - Complete Player Guide
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 
-**Applies to:** Fleet Operations Command v1.39, Build 040
+**Applies to:** Fleet Operations Command v1.49, Build 050
 
 **Game:** X4: Foundations
 
-**Purpose:** Help a new player find fleets, start patrols, answer distress calls, train Pilots and Marines, maintain damaged or lost ships, and understand every FOC page without guessing.
+**Purpose:** Help a new player find fleets, inspect historical sector intelligence, mark exact Fleet Homes, start patrols, answer distress calls, train Pilots and Marines, maintain damaged or lost ships, and understand every FOC page without guessing.
 
 FOC is designed to be safe. It explains what it found, what it plans to do, and why an action was allowed or blocked. You stay in command.
 
-Older reference screenshots may show an earlier build number. The newest workflow screenshots show Build 038 or Build 040 because those exact runtime sessions proved the guidance, feedback, fleet-finder, Task Force, and Marine-assignment behavior delivered in v1.39.
+Older reference screenshots may show an earlier build number. Those screenshots document the exact runtime sessions that proved the pictured workflow. The text in this guide is current for Build 050, including the dedicated FOC Historical Intelligence Map delivered in v1.49.
 
 ---
 
 ## 1. What FOC does
 
-Fleet Operations Command is a fleet patrol, readiness, recovery, training, and response console. It helps answer seven questions:
+Fleet Operations Command is a fleet patrol, readiness, recovery, training, intelligence, and response console. It helps answer eight questions:
 
 1. Which player combat fleets exist right now?
 2. Which fleets are ready to receive orders?
@@ -25,6 +25,7 @@ Fleet Operations Command is a fleet patrol, readiness, recovery, training, and r
 5. Which distress calls should a fleet answer?
 6. Which damaged or lost fleet ships need attention?
 7. Did X4 actually accept the requested action?
+8. What has FOC actually observed in each discovered sector and along recent routes?
 
 FOC uses X4's live commander hierarchy instead of trusting fleet names or old markers. It can start native patrols, help staff ships, hand damaged ships to X4's native Repair / Upgrade screen, preserve exact lost-ship records, request guarded rebuilds, and send one eligible response fleet to a fresh attack.
 
@@ -73,7 +74,7 @@ Do not place `jk_foc` inside a second `jk_foc` folder. Do not mix files from dif
 
 Steam updates the Workshop copy automatically. For a manual copy, close X4, preserve the previous folder if you want a rollback copy, and replace the complete `jk_foc` folder.
 
-Version 1.39 migrates valid FOC plans, recovery records, Academy state, exact story-ship answers, Task Forces, templates, reports, and operations policy from existing saves. The migration repairs or discards malformed roadmap records conservatively. Missing evidence remains blocked instead of being guessed.
+Version 1.49 migrates valid FOC plans, recovery records, Academy state, exact story-ship answers, Task Forces, templates, reports, operations policy, pirate observations, and enrolled-fleet patrol traversals from existing saves. The migration repairs or discards malformed records conservatively. Missing evidence remains blocked instead of being guessed.
 
 ### Removing
 
@@ -89,17 +90,18 @@ Close X4, unsubscribe on Steam or remove the manual `jk_foc` folder, then start 
 4. Select **OPEN FLEET OPERATIONS COMMAND**.
 5. Wait for the bounded inventory snapshot to finish.
 
-The top bar has nine tabs:
+The top bar has ten tabs:
 
 1. **COMMAND** - fleet status, global authority, plan controls, and emergency stop.
 2. **FLEETS** - fleet selection, Home, patrol, distress rules, story protection, and maintenance.
-3. **READINESS** - captain coverage, proven vacancies, and unknown evidence.
-4. **TRAINING ACADEMY** - Pilot and Marine trainees, seminars, assignments, and captain auto-fill.
-5. **ACADEMY STORE** - approved training-supply purchases and inventory results.
-6. **FLEET RESPONSE** - current incidents and eligible dispatch.
-7. **ACTIVITY** - requests, blockers, native readback, and recent history.
-8. **TASK FORCES** - named multi-fleet groups, defense zones, active/reserve roles, and bounded rotation.
-9. **SETTINGS** - persistent authority, readiness, retreat, templates, and presets.
+3. **TASK FORCES** - named multi-fleet groups, defense zones, active/reserve roles, and bounded rotation.
+4. **READINESS** - captain coverage, proven vacancies, and unknown evidence.
+5. **TRAINING ACADEMY** - Pilot and Marine trainees, seminars, assignments, and captain auto-fill.
+6. **ACADEMY STORE** - approved training-supply purchases and inventory results.
+7. **FLEET RESPONSE** - current incidents and eligible dispatch.
+8. **ACTIVITY** - requests, blockers, native readback, and recent history.
+9. **OPERATIONS MAP** - historical sector intelligence, saved Homes, fleet presence, readiness, and evidence-based route filters.
+10. **SETTINGS** - persistent authority, readiness, retreat, templates, and presets.
 
 Use **REFRESH** when you want a new bounded snapshot. A refresh does not send orders.
 
@@ -129,7 +131,7 @@ Use this safe setup the first time:
 4. Open **COMMAND** and confirm the fleet count looks reasonable.
 5. Open **READINESS** and check for ships marked **MISSING**.
 6. Open **FLEETS** and select one normal player combat fleet.
-7. Choose a Home point.
+7. Choose a Home point on the dedicated FOC map.
 8. Set distress-response options.
 9. Read the summary: Home, Fleet Order, Distress Call, and Return.
 10. Press **SEND THIS FLEET ON PATROL - REPLACES CURRENT ORDERS**.
@@ -208,12 +210,12 @@ After you answer, the question and both buttons disappear. FOC automatically rel
 ### Step 3 - Choose Home
 
 1. Select **CHOOSE HOME POINT ON MAP**.
-2. Move the map to a discovered sector.
-3. Right-click the exact spot the fleet should use as Home.
-4. Select **SET AS FOC HOME POINT**.
-5. Return to FOC and confirm the sector and coordinates.
+2. FOC opens its dedicated Historical Intelligence Map in location-marking mode.
+3. Pan or zoom to a player-discovered sector.
+4. Left-click the exact point the fleet should use as Home. A drag pans; it does not select a point.
+5. FOC returns to the fleet draft. Confirm the sector and exact X, Y, and Z coordinates before sending.
 
-Choosing Home sends no order.
+Press **Escape** or **BACK TO FOC** to cancel without changing the Home point. Choosing Home changes only the unsaved fleet draft and sends no order.
 
 ### Step 4 - Set the fleet order and distress rules
 
@@ -242,7 +244,47 @@ FOC reports **PATROL ACTIVE** only after X4 returns the intended current and def
 
 ---
 
-## 7. TASK FORCES - coordinate several fleets
+## 7. OPERATIONS MAP - historical intelligence and exact locations
+
+The **OPERATIONS MAP** tab opens FOC's dedicated full-screen Historical Intelligence Map. It is not the ordinary X4 map. It uses X4's native holomap navigation while keeping FOC's own intelligence panel and location-marking workflow.
+
+### Navigate the map
+
+- Move the pointer over a known sector cell to update the intelligence panel.
+- Left-drag to pan.
+- Right-drag to rotate.
+- Use the mouse wheel to zoom.
+- Select **RESET VIEW** to return to the discovered-universe view.
+- Select **BACK TO FOC** or press **Escape** to leave the map safely.
+
+A short click selects a known sector while browsing. When FOC opened the map to mark a Fleet Home or another request-scoped location, a short left-click chooses the exact point and returns it to the requesting FOC workflow. Dragging still pans, and cancelling sends no order.
+
+### Read sector intelligence
+
+The panel describes the sector currently under the pointer, or the selected sector when no hover target is active. Depending on retained evidence it can show:
+
+- **Risk** - FOC's bounded evidence score and its Quiet, Elevated, High, or Critical label;
+- **Fleet presence** - observed enrolled fleets in that sector;
+- **Saved Homes** - fleet Home locations saved there;
+- **Readiness** - counts of fleets with critical or degraded evidence;
+- **Filter evidence** - pirate observations or enrolled-fleet gate traversals within the selected observation window; and
+- **Unlocated** - threat observations that FOC could not safely place on a known sector.
+
+**NO FOC SECTOR EVIDENCE** means FOC has no retained record for that sector. It does not prove that the sector is safe. FOC shows only player-discovered space and hides civilian ships, order queues, trade offers, and resource overlays to keep the intelligence view focused.
+
+### Use the analysis filter
+
+- **OVERVIEW** keeps routes neutral and emphasizes the hovered sector's general FOC evidence.
+- **PIRATE ACTIVITY** uses retained attacks on player-owned assets where X4 positively identified the attacker's true owner as a pirate faction.
+- **HEAVY PATROL ROUTES** uses observed adjacent-gate crossings by enrolled FOC fleet commanders. FOC samples commander sectors every 30 seconds; it does not infer a crossing between non-adjacent sectors.
+
+Filtered route strokes are FOC analysis colors, not faction ownership: yellow is lower retained evidence, amber is stronger evidence, and red is the hottest retained evidence. Native gate lines remain visible and neutral. The filter does not predict future danger, reveal undiscovered space, or send an order.
+
+FOC retains at most 200 valid pirate observations and 250 valid patrol traversals. The default analysis window is 60 minutes. A route appears only when retained evidence falls inside the active window, so an unchanged neutral line means **no qualifying report**, not **proven safe**.
+
+---
+
+## 8. TASK FORCES - coordinate several fleets
 
 ![Task Force workflow with optional next-step pointers](images/11_Task_Forces_v139.png)
 
@@ -286,7 +328,7 @@ Removing a fleet from a Task Force changes only FOC's grouping. Deleting a Task 
 
 ---
 
-## 8. Repair, replace, or rebuild fleet ships
+## 9. Repair, replace, or rebuild fleet ships
 
 Open **FLEETS**, then choose **REPAIR / REPLACE / REBUILD**.
 
@@ -322,7 +364,7 @@ When X4 reports native build completion, FOC restores the saved ship name and hi
 
 ---
 
-## 9. READINESS - find ships without captains
+## 10. READINESS - find ships without captains
 
 ![Readiness page](images/03_Readiness.jpg)
 
@@ -342,11 +384,9 @@ A fleet can appear structurally complete but remain unable to act when one requi
 
 ---
 
-## 10. TRAINING ACADEMY - Pilots, Marines, and captains
+## 11. TRAINING ACADEMY - Pilots, Marines, and captains
 
 ![Training Academy page](images/04_Training_Academy.jpg)
-
-![Confirmed Marine assignment with native crew readback](images/13_Marine_Assignment_v139.png)
 
 ### The shared roster
 
@@ -387,6 +427,8 @@ One click consumes at most one correct training supply.
 4. Approve the transfer.
 5. Wait for native Marine role and destination readback.
 
+![Confirmed Marine assignment with native crew readback](images/13_Marine_Assignment_v139.png)
+
 ### Captain auto-fill
 
 Preview before approval. FOC revalidates up to 25 proven vacancies, retained Pilot trainees, Academy capacity, eligible player stations, and complete seminar inventory. It recruits only missing trainees, trains selected Pilots to the required level, assigns each to a still-vacant ship, and reports requested, recruited, assigned, and blocked counts.
@@ -395,7 +437,7 @@ No existing captain or shipboard crew is taken.
 
 ---
 
-## 11. ACADEMY STORE - buy training supplies
+## 12. ACADEMY STORE - buy training supplies
 
 Open **ACADEMY STORE** when training is blocked by missing supplies.
 
@@ -410,11 +452,11 @@ The Store is a player-approved spending action. Opening the page, refreshing, or
 
 ---
 
-## 12. FLEET RESPONSE - answer one fresh distress call
+## 13. FLEET RESPONSE - answer one fresh distress call
 
 Fleet Response checks whether one ready fleet may answer a recent attack. It considers ownership, urgency, damage, distance, captain, readiness, player control, story protection, response locks, current orders, and incident age.
 
-Version 1.39 also sizes the response to the observed attacker. FOC classifies a known attacker as **XS**, **S**, **M**, **L**, **XL**, or **UNKNOWN** and requires at least 1, 1, 3, 6, 10, or 1 ready ships respectively. Among fleets that pass every gate, it prefers the smallest adequate fleet before distance and saved priority. UNKNOWN never means harmless; it uses the conservative implemented fallback and remains visible in the evidence.
+FOC sizes the response to the observed attacker. It classifies a known attacker as **XS**, **S**, **M**, **L**, **XL**, or **UNKNOWN** and requires at least 1, 1, 3, 6, 10, or 1 ready ships respectively. Among fleets that pass every gate, it prefers the smallest adequate fleet before distance and saved priority. UNKNOWN never means harmless; it uses the conservative implemented fallback and remains visible in the evidence.
 
 ### What to do
 
@@ -435,7 +477,7 @@ Do not keep pressing Approve while an action is pending.
 
 ---
 
-## 13. ACTIVITY - read the proof trail
+## 14. ACTIVITY - read the proof trail
 
 ![Activity page](images/07_Activity_v134.png)
 
@@ -450,7 +492,7 @@ Entries can show:
 - repair, rebuild, training, Store, and story-protection results; and
 - what X4 returned.
 
-Version 1.39 suppresses repeated locked-incident noise from the visible feed while preserving meaningful transitions. A new incident, first red-damage transition, dispatch, resolution, failure, or changed outcome still appears. Repeated observations that cannot create another order do not consume the newest rows simply to say that the duplicate was suppressed.
+FOC suppresses repeated locked-incident noise from the visible feed while preserving meaningful transitions. A new incident, first red-damage transition, dispatch, resolution, failure, or changed outcome still appears. Repeated observations that cannot create another order do not consume the newest rows simply to say that the duplicate was suppressed.
 
 ### After-action reports
 
@@ -462,7 +504,7 @@ Read the newest entry literally. Correct only the named problem. If a green resu
 
 ---
 
-## 14. SETTINGS - decide how much authority FOC has
+## 15. SETTINGS - decide how much authority FOC has
 
 ![Settings page](images/08_Settings.jpg)
 
@@ -477,7 +519,7 @@ Use **APPLY APPROVED PLAN** when you want Command to apply eligible saved plans.
 
 ### Readiness policy
 
-Version 1.39 lets you set four fleet-readiness gates:
+FOC lets you set four fleet-readiness gates:
 
 - minimum commander hull;
 - minimum fleet hull;
@@ -507,7 +549,7 @@ A visible cap means the result is bounded. It does not mean an unseen object is 
 
 ---
 
-## 15. Advanced Fleet Controls
+## 16. Advanced Fleet Controls
 
 Select **SHOW ADVANCED CONTROLS** only when you need additional fleet state and manual controls.
 
@@ -515,7 +557,7 @@ Advanced controls can preview current saved state, save without sending, lock or
 
 ### Native subordinate-group policies
 
-Version 1.39 exposes four real X4 subordinate-group switches for each current direct group:
+FOC exposes four real X4 subordinate-group switches for each current direct group:
 
 - dock with the commander;
 - resupply at the fleet;
@@ -526,19 +568,19 @@ Preview the exact groups first. Approval captures the pre-change value, changes 
 
 The docking option is the roadmap feature requested by players who want escort fighters to land when their commander docks. It operates through X4's implemented group policy; it does not teleport ships, create docking capacity, or bypass a station or carrier's normal docking rules.
 
-They do not restore removed custom routes, sector lists, or patrol-pattern controls. Version 1.39 exposes only behavior backed by implemented native X4 orders.
+These switches do not create a patrol route. The Operations Map's colored route strokes are historical evidence overlays only; they never become ship orders. FOC sends only behavior backed by implemented native X4 orders.
 
 > **Important:** A saved fleet Draft is not proof that a patrol is active. Look for **PATROL ACTIVE** and confirm the real X4 order.
 
 ---
 
-## 16. Confirm behavior in X4
+## 17. Confirm behavior in X4
 
 ![Patrol in action](images/09_Patrol_In_Action.jpg)
 
 FOC's readback matters, but also check the game world:
 
-1. Open the X4 map.
+1. Open the ordinary X4 map. This is separate from FOC's Historical Intelligence Map.
 2. Select the fleet commander.
 3. Check current and default behavior.
 4. Watch the fleet begin moving.
@@ -550,7 +592,7 @@ Old or removed mods can leave malformed ship or crew state. FOC blocks uncertain
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### FOC does not appear
 
@@ -593,6 +635,23 @@ Read the exact ship name and question. Choose **NO - LET FOC CONTROL IT** only w
 
 Do not click repeatedly. Wait, refresh once, and inspect **ACTIVITY**. If no result appears, preserve a screenshot and the relevant X4 debug log.
 
+### The Operations Map shows no colored route
+
+- Confirm **PIRATE ACTIVITY** or **HEAVY PATROL ROUTES** is selected instead of **OVERVIEW**.
+- Move over a known sector and read **FILTER EVIDENCE**.
+- A pirate line requires a retained, positively identified pirate attack observation on a player-owned asset.
+- A patrol line requires an observed adjacent-gate crossing by an enrolled fleet commander.
+- Evidence outside the active observation window is intentionally excluded.
+- No colored line means no qualifying retained evidence. It does not mean the route is safe.
+
+### The Operations Map will not mark Home
+
+- Open it from the selected fleet's **CHOOSE HOME POINT ON MAP** button so FOC enters request-scoped mark mode.
+- Use a short left-click on a player-known sector cell. Do not right-click.
+- If the map pans, release the drag and click the exact point without moving the mouse.
+- **Escape** cancels and returns no location.
+- After FOC returns, verify the fleet name, sector, and X/Y/Z coordinates before sending.
+
 ### The result and the game disagree
 
 Treat that as a bug. Record the fleet, ship, button, visible FOC result, real X4 state, approximate time, and any older mod that changed the object.
@@ -601,11 +660,19 @@ Report issues at [github.com/razoreqx1/FOC/issues](https://github.com/razoreqx1/
 
 ---
 
-## 18. Quick command card
+## 19. Quick command card
 
 ### Start one patrol
 
 `FLEETS -> select fleet -> answer any story question -> choose Home -> set response rules -> SEND THIS FLEET ON PATROL -> wait for PATROL ACTIVE -> ACTIVITY`
+
+### Inspect historical sector intelligence
+
+`OPERATIONS MAP -> hover a known sector -> read FILTER EVIDENCE and RISK -> choose PIRATE ACTIVITY or HEAVY PATROL ROUTES -> inspect yellow / amber / red evidence routes -> BACK TO FOC`
+
+### Mark an exact Fleet Home
+
+`FLEETS -> select fleet -> CHOOSE HOME POINT ON MAP -> pan or zoom -> short left-click exact known point -> confirm returned sector and X/Y/Z -> send only when ready`
 
 ### Find one fleet quickly
 
@@ -649,7 +716,7 @@ Report issues at [github.com/razoreqx1/FOC/issues](https://github.com/razoreqx1/
 
 ---
 
-## 19. Getting help
+## 20. Getting help
 
 Before reporting a problem, take a screenshot of the complete FOC page and write down what the affected ship is actually doing in X4. Include the visible result, fleet name, ship name, action, approximate time, and whether another mod changed that ship.
 

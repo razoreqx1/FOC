@@ -35,6 +35,11 @@ local menu = {
     liveActivity = {},
     liveActivityIncoming = nil,
     activityView = "live",
+    gameTime = 0,
+    operationsMap = { filter = "OVERVIEW", window = 60, selected = nil },
+    mapPirateObservations = {},
+    mapPatrolTraversals = {},
+    mapGateEdges = {},
     homeSectorByFleet = {},
     ordersByFleet = {},
     draftsByFleet = {},
@@ -116,6 +121,8 @@ local requiredActionBackground = { r = 125, g = 82, b = 12, a = 100 }
 local failedActionBackground = { r = 105, g = 32, b = 32, a = 100 }
 local pointerActionBackground = { r = 92, g = 48, b = 145, a = 100 }
 local rebuild
+local buildOperationsIntel
+local bridgeComponent64
 
 local tabs = {
     { id = "command", label = "COMMAND" },
@@ -126,6 +133,7 @@ local tabs = {
     { id = "store", label = "ACADEMY STORE" },
     { id = "response", label = "FLEET RESPONSE" },
     { id = "activity", label = "ACTIVITY" },
+    { id = "operationsmap", label = "OPERATIONS MAP" },
     { id = "settings", label = "SETTINGS" },
 }
 
@@ -138,6 +146,7 @@ local guides = {
     store = "Buy Pilot Lessons or Marine Credits with credits. Every purchase is verified before FOC reports success.",
     response = "Configure FOC Fleet Response scope, safeguards, dispatch limits, and return behavior.",
     activity = "Watch proven FOC actions as they happen, or review this session's bounded history.",
+    operationsmap = "Open the dedicated discovered-space Operations Map with native navigation and bounded FOC sector intelligence.",
     settings = "Configure global planning mode and review hard scan, mutation, cooldown, and audit bounds.",
 }
 
@@ -154,6 +163,8 @@ local taskForcePriorities = { "HIGH", "NORMAL", "EXCLUDED" }
 local rotationModes = { "MANUAL", "FULL AUTOMATION" }
 local automationPresets = { "PROTECT HOME", "GUARD TRADERS", "DEFEND STATIONS", "HUNT PIRATES", "STAY SAFE", "MANUAL ORDERS ONLY" }
 local fleetFinderOptions = { "ALL FLEETS", "A-F", "G-L", "M-R", "S-Z" }
+local operationsMapFilters = { "OVERVIEW", "PIRATE ACTIVITY", "HEAVY PATROL ROUTES", "FLEET HOMES" }
+local operationsMapWindows = { 15, 60, 180 }
 
 local function normalizeFleetRole(value)
     local text = tostring(value or "")
@@ -215,6 +226,60 @@ local function loadLiveActivityRows(rows)
     while #restored > LIVE_ACTIVITY_LIMIT do table.remove(restored) end
     menu.liveActivity = restored
     return #restored
+end
+
+local function loadMapPirateObservations(rows)
+    local restored = {}
+    for _, row in ipairs(type(rows) == "table" and rows or {}) do
+        local sector64 = type(row) == "table" and tonumber(row[1]) == 1 and bridgeComponent64(row[3]) or nil
+        if sector64 and tonumber(row[2]) then
+            restored[#restored + 1] = {
+                time = tonumber(row[2]), sector = tostring(sector64),
+                sectorName = safeText(row[4], "UNKNOWN SECTOR"),
+                faction = safeText(row[5], "UNKNOWN PIRATE FACTION"),
+                attacker = safeText(row[6], "UNKNOWN ATTACKER"),
+                severity = activitySeverity("PIRATE_ACTIVITY", "", row[7]),
+            }
+        end
+        if #restored >= 200 then break end
+    end
+    menu.mapPirateObservations = restored
+end
+
+local function loadMapPatrolTraversals(rows)
+    local restored = {}
+    for _, row in ipairs(type(rows) == "table" and rows or {}) do
+        local from64 = type(row) == "table" and tonumber(row[1]) == 1 and bridgeComponent64(row[5]) or nil
+        local to64 = type(row) == "table" and bridgeComponent64(row[7]) or nil
+        if from64 and to64 and tostring(from64) ~= tostring(to64) and tonumber(row[2]) then
+            restored[#restored + 1] = {
+                time = tonumber(row[2]), commanderID = safeText(row[3], "UNKNOWN"),
+                commander = safeText(row[4], "UNKNOWN FLEET"),
+                from = tostring(from64), fromName = safeText(row[6], "UNKNOWN SECTOR"),
+                to = tostring(to64), toName = safeText(row[8], "UNKNOWN SECTOR"),
+            }
+        end
+        if #restored >= 250 then break end
+    end
+    menu.mapPatrolTraversals = restored
+end
+
+local function loadMapGateEdges(rows)
+    local restored, seen = {}, {}
+    for _, row in ipairs(type(rows) == "table" and rows or {}) do
+        local from64 = type(row) == "table" and bridgeComponent64(row[1]) or nil
+        local to64 = type(row) == "table" and bridgeComponent64(row[3]) or nil
+        if from64 and to64 and tostring(from64) ~= tostring(to64) then
+            local a, b = tostring(from64), tostring(to64)
+            local key = a < b and (a .. ":" .. b) or (b .. ":" .. a)
+            if not seen[key] then
+                seen[key] = true
+                restored[#restored + 1] = { from = a, fromName = safeText(row[2], "UNKNOWN SECTOR"), to = b, toName = safeText(row[4], "UNKNOWN SECTOR") }
+            end
+        end
+        if #restored >= 500 then break end
+    end
+    menu.mapGateEdges = restored
 end
 
 local function loadAcademyRows(rows)
@@ -368,7 +433,7 @@ local function toComponent64(value)
     return nil
 end
 
-local function bridgeComponent64(value)
+bridgeComponent64 = function(value)
     if value == nil or value == 0 then return nil end
     local raw = tostring(value)
     if raw == "" or raw:match("^0+[uUlL]*$") or raw:match("^0[xX]0+[uUlL]*$") then return nil end
@@ -581,25 +646,18 @@ local function restorePersistentDrafts(rows)
     return restored
 end
 
-local function menuByName(name)
-    for _, entry in ipairs(Menus or {}) do
-        if entry.name == name then return entry end
-    end
-    return nil
-end
-
-local function returnFromHomeMap(value)
-    local pending = menu.pendingHomeSelection
+function menu.operationsMapLocationSelected(childMenu, request, value)
+    local pending = type(request) == "table" and request or menu.pendingHomeSelection
     local sector64 = type(value) == "table" and toComponent64(value[1]) or nil
     local position = type(value) == "table" and value[2] or nil
-    if pending and pending.fleetKey and sector64 and type(position) == "table" then
+    if pending and pending.kind == "HOME" and pending.fleetKey and sector64 and type(position) == "table" then
         menu.restoreFleetKey = pending.fleetKey
         local sectorName = componentName(sector64, "UNKNOWN SECTOR")
         local sectorKey = stableSectorKey(sector64, sectorName)
         if not sectorKey then
             menu.pendingHomeSelection = nil
             menu.plan.lastResult = "HOME POINT NOT CHANGED - SECTOR IDENTITY IS UNKNOWN"
-            DebugError("[FOC][B040][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
+            DebugError("[FOC][B050][HOME_MAP_INVALID] reason=STABLE_SECTOR_IDENTITY_UNKNOWN mutation=NONE")
         else
             menu.homeSectorByFleet[pending.fleetKey] = {
                 id = sectorKey,
@@ -608,50 +666,18 @@ local function returnFromHomeMap(value)
             }
             markFleetOrdersChanged(pending.fleetKey, ordersForFleet(pending.fleetKey))
             menu.plan.lastResult = "HOME POINT CHOSEN - DRAFT NOT YET SAVED - NO ORDERS SENT"
-            DebugError("[FOC][B040][HOME_MAP_SELECTED] fleet=" .. pending.fleetAudit .. " sector=" .. sectorName .. " sector_key=" .. sectorKey .. " mutation=NONE")
+            DebugError(string.format("[FOC][B050][HOME_MAP_SELECTED] fleet=%s sector=%s sector_key=%s position=%.3f,%.3f,%.3f mutation=DRAFT_ONLY orders=NONE", pending.fleetAudit, sectorName, sectorKey, menu.homeSectorByFleet[pending.fleetKey].position[1], menu.homeSectorByFleet[pending.fleetKey].position[2], menu.homeSectorByFleet[pending.fleetKey].position[3]))
         end
     else
         menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP RETURN WAS INVALID - NO ORDERS SENT"
-        DebugError("[FOC][B040][HOME_MAP_INVALID] mutation=NONE")
+        DebugError("[FOC][B050][HOME_MAP_INVALID] mutation=NONE")
     end
     menu.pendingHomeSelection = nil
-    local mapMenu = menuByName("MapMenu")
-    if mapMenu then
-        local metadata = menu.homeReturnMetadata or {}
-        Helper.closeMenuAndOpenNewMenu(mapMenu, menu.name, { 0, 0, metadata[1], metadata[2], metadata[3], menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
-        menu.homeReturnMetadata = nil
-        if mapMenu.cleanup then mapMenu.cleanup() end
+    menu.homeReturnMetadata = nil
+    if childMenu and childMenu.name == "FOC_OperationsMap" then
+        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 149, "FOC Build 050", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
+        if childMenu.cleanup then childMenu.cleanup() end
     end
-end
-
-local function installInteractHomeHook()
-    local interactMenu = menuByName("InteractMenu")
-    if not interactMenu or not interactMenu.prepareActions or interactMenu.focHomeHookInstalled then return interactMenu ~= nil end
-    local originalPrepareActions = interactMenu.prepareActions
-    interactMenu.prepareActions = function(...)
-        local result = originalPrepareActions(...)
-        if menu.pendingHomeSelection and interactMenu.insertInteractionContent and interactMenu.offsetcomponent and interactMenu.offset then
-            interactMenu.insertInteractionContent("guidance", {
-                active = true,
-                type = "foc_home_point",
-                text = "SET AS FOC HOME POINT",
-                script = function()
-                    local offsetcomponent = tostring(interactMenu.offsetcomponent)
-                    local offset = interactMenu.offset
-                    local selectedValue = {
-                        offsetcomponent,
-                        { tonumber(offset.x) or 0, tonumber(offset.y) or 0, tonumber(offset.z) or 0 },
-                    }
-                    interactMenu.onCloseElement("close")
-                    returnFromHomeMap(selectedValue)
-                end,
-            })
-        end
-        return result
-    end
-    interactMenu.focHomeHookInstalled = true
-    DebugError("[FOC][B040][INTERACT_HOME_HOOK] installed=true mutation=NONE")
-    return true
 end
 
 local function chooseHomeOnMap(selected)
@@ -661,23 +687,15 @@ local function chooseHomeOnMap(selected)
         rebuild(false)
         return
     end
-    menu.pendingHomeSelection = { fleetKey = key, fleetAudit = fleetAuditSubject(selected, key) }
-    local focus = selected.commander.object
-    if not installInteractHomeHook() then
-        menu.pendingHomeSelection = nil
-        menu.plan.lastResult = "HOME POINT NOT CHANGED - FOC COULD NOT OPEN X4'S SAFE RIGHT-CLICK CHOICE. NOTHING CHANGED."
-        menu.plan.lastState = "ACTION_REQUIRED_HOME"
-        menu.notice = menu.plan.lastResult
-        rebuild(false)
-        return
-    end
-    menu.plan.lastResult = "MAP OPEN - RIGHT-CLICK THE HOME POINT AND CHOOSE SET AS FOC HOME POINT"
+    menu.pendingHomeSelection = { kind = "HOME", fleetKey = key, fleetAudit = fleetAuditSubject(selected, key) }
+    menu.plan.lastResult = "FOC MAP OPEN - CLICK THE EXACT HOME POINT; DRAG STILL PANS; ESCAPE CANCELS"
     menu.homeReturnMetadata = {
         menu.param and menu.param[3] or nil,
         menu.param and menu.param[4] or nil,
         menu.param and menu.param[5] or nil,
     }
-    Helper.closeMenuAndOpenNewMenu(menu, "MapMenu", { 0, 0, true, focus })
+    local intel, unlocated = buildOperationsIntel()
+    Helper.closeMenuAndOpenNewMenu(menu, "FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, menu.pendingHomeSelection, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime })
     menu.frame = nil
     menu.mainTable = nil
 end
@@ -930,7 +948,7 @@ local function sampleFleets(reason)
     })
     while #menu.history > HISTORY_LIMIT do table.remove(menu.history) end
     menu.selectedFleet = clamp(menu.selectedFleet, 1, math.max(1, #fleets))
-    DebugError("[FOC][B040][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(shipsExamined) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " source=MD_STRUCTURAL_ALLSUBORDINATES authoritative=1 mutation=NONE")
+    DebugError("[FOC][B048][SAMPLE] reason=" .. sample.reason .. " ships_examined=" .. tostring(shipsExamined) .. " fleets=" .. tostring(#fleets) .. " protected=" .. tostring(menu.protectedShipCount) .. " source=MD_STRUCTURAL_ALLSUBORDINATES authoritative=1 mutation=NONE")
 end
 
 local function loadStructuralFleetRows(rows)
@@ -1272,7 +1290,7 @@ local function requestFleetDraftSave(selected, key, orders, home)
     if menu.pendingDraftSaves[key] then
         menu.plan.lastResult = "DRAFT SAVE ALREADY PENDING - WAITING FOR PERSISTENT READBACK"
         menu.notice = menu.plan.lastResult
-        DebugError("[FOC][B040][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
+        DebugError("[FOC][B048][DRAFT_SAVE_SUPPRESSED] key=" .. tostring(key or "UNKNOWN") .. " reason=PENDING_READBACK mutation=NONE")
         rebuild(false)
         return
     end
@@ -1308,7 +1326,7 @@ local function requestFleetDraftSave(selected, key, orders, home)
     menu.plan.lastState = "SAVE_PENDING"
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B040][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
+    DebugError("[FOC][B048][DRAFT_SAVE_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " schema=4 readback=PENDING mutation=NONE")
     rebuild(false)
 end
 
@@ -1360,7 +1378,7 @@ local function requestFleetPatrolStart(selected, key, orders, home)
     menu.plan.lastState = payload[5]
     menu.plan.lastResult = payload[6]
     menu.notice = payload[6]
-    DebugError("[FOC][B040][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
+    DebugError("[FOC][B048][FLEET_PATROL_REQUEST] fleet=" .. fleetAuditSubject(selected, key) .. " home_key=" .. tostring(home.id) .. " replace_selected=1 automation_selected=1 readback=PENDING")
     rebuild(false)
 end
 
@@ -1394,7 +1412,7 @@ local function draftSaveComplete()
         menu.history[1].state = state
         menu.history[1].result = result
     end
-    DebugError("[FOC][B040][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
+    DebugError("[FOC][B048][DRAFT_SAVE_READBACK] key=" .. tostring(key or "UNKNOWN") .. " state=" .. state .. " result=" .. result .. " mutation=NONE")
     menu.draftReadback = { key = nil, result = nil, state = nil }
     if menu.frame then rebuild(false) end
 end
@@ -1451,6 +1469,7 @@ local function liveActivityState(_, value) liveActivityRow().state = safeText(va
 local function liveActivitySubject(_, value) liveActivityRow().subject = safeText(value, "FOC") end
 local function liveActivityDetail(_, value) liveActivityRow().detail = safeText(value, "No detail recorded.") end
 local function liveActivitySeverity(_, value) liveActivityRow().severity = activitySeverity(liveActivityRow().kind, liveActivityRow().detail, value) end
+local function liveActivityNow(_, value) menu.gameTime = tonumber(value) or menu.gameTime end
 local function liveActivityCommit()
     local row = menu.liveActivityIncoming
     menu.liveActivityIncoming = nil
@@ -1498,11 +1517,11 @@ local function academySnapshotComplete()
     local incoming = menu.academyIncoming
     menu.academyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=ACADEMY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadAcademyRows(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=ACADEMY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1520,7 +1539,7 @@ local function protectedSnapshotComplete()
     local incoming = menu.protectedIncoming
     menu.protectedIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=PROTECTED expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         if menu.plan.lastState == "REFRESH_PENDING" then
             menu.plan.lastState = "BLOCKED"
             menu.plan.lastResult = "REFRESH BLOCKED - PROTECTED SHIP SNAPSHOT WAS INCOMPLETE | PRIOR PROTECTION CACHE PRESERVED"
@@ -1530,7 +1549,7 @@ local function protectedSnapshotComplete()
         return
     end
     loadProtectedShipIDs(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=PROTECTED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then
         sampleFleets("MD_PROTECTION_REFRESH")
         if menu.plan.lastState == "REFRESH_PENDING" then
@@ -1556,11 +1575,11 @@ local function storyOverrideSnapshotComplete()
     local incoming = menu.storyOverrideIncoming
     menu.storyOverrideIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=STORY_OVERRIDES cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=STORY_OVERRIDES cache=PRESERVED")
         return
     end
     loadStoryOverrideIDs(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=STORY_OVERRIDES rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=STORY_OVERRIDES rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then sampleFleets("MD_STORY_OVERRIDE_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
 end
 
@@ -1578,11 +1597,11 @@ function menu.storyAnsweredSnapshotComplete()
     local incoming = menu.storyAnsweredIncoming
     menu.storyAnsweredIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=STORY_ANSWERED cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=STORY_ANSWERED cache=PRESERVED")
         return
     end
     loadStoryAnsweredIDs(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=STORY_ANSWERED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=STORY_ANSWERED rows=" .. tostring(#incoming.rows) .. " cache=REPLACED")
     if menu.frame then sampleFleets("MD_STORY_ANSWERED_REFRESH"); if not menu.pendingActionKind then rebuild(false) end end
 end
 
@@ -1613,11 +1632,11 @@ local function vacancySnapshotComplete()
     local incoming = menu.vacancyIncoming
     menu.vacancyIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=VACANCY expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadVacancyRows(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=VACANCY rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1652,11 +1671,11 @@ local function marineTargetSnapshotComplete()
     local incoming = menu.marineTargetIncoming
     menu.marineTargetIncoming = nil
     if not incoming or incoming.expected < 0 or #incoming.rows ~= incoming.expected then
-        DebugError("[FOC][B040][COLLECTION_REJECTED] collection=MARINE_TARGET expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
+        DebugError("[FOC][B048][COLLECTION_REJECTED] collection=MARINE_TARGET expected=" .. tostring(incoming and incoming.expected or "NONE") .. " received=" .. tostring(incoming and #incoming.rows or 0) .. " cache=PRESERVED")
         return
     end
     loadMarineTargetRows(incoming.rows)
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=MARINE_TARGET rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=MARINE_TARGET rows=" .. tostring(#incoming.rows) .. " cache=REPLACED identity=NATIVE_COMPONENT")
     if menu.frame and not menu.pendingActionKind and menu.plan.lastState ~= "REFRESH_PENDING" then rebuild(false) end
 end
 
@@ -1679,7 +1698,7 @@ local function storeSnapshotComplete()
     if not menu.storeIncoming then return end
     menu.store = menu.storeIncoming
     menu.storeIncoming = nil
-    DebugError("[FOC][B040][COLLECTION_COMMIT] collection=ACADEMY_STORE tiers=5 balance=" .. tostring(menu.store.balance))
+    DebugError("[FOC][B048][COLLECTION_COMMIT] collection=ACADEMY_STORE tiers=5 balance=" .. tostring(menu.store.balance))
     if menu.frame and not menu.pendingActionKind then rebuild(false) end
 end
 
@@ -1763,34 +1782,40 @@ local function createHeader(frame, width)
     local tabHeight = Helper.scaleY(38)
     local feedbackHeight = Helper.scaleY(Helper.standardTextHeight + 8)
     local headerHeight = titleHeight + tabHeight + feedbackHeight
-    local header = frame:addTable(10, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
+    local header = frame:addTable(11, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
     local title = header:addRow(true, { fixed = true })
     local screenTitle = menu.page == "fleets" and "FLEET ORDERS" or "PLAN CONTROL"
     local buildLabel = safeText(menu.param and menu.param[4], "FOC Build UNKNOWN"):gsub("^FOC%s+", ""):upper()
-    title[1]:setColSpan(7):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
-    title[8]:setColSpan(2):createButton({ active = true, bgColor = pointerActionBackground }):setText(menu.workflowPointersVisible and "CLEAR NEXT-STEP POINTERS" or "SHOW NEXT-STEP POINTERS", { halign = "center" })
-    title[8].handlers.onClick = function()
+    title[1]:setColSpan(8):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
+    title[9]:setColSpan(2):createButton({ active = true, bgColor = pointerActionBackground }):setText(menu.workflowPointersVisible and "CLEAR NEXT-STEP POINTERS" or "SHOW NEXT-STEP POINTERS", { halign = "center" })
+    title[9].handlers.onClick = function()
         menu.workflowPointersVisible = not menu.workflowPointersVisible
         menu.notice = menu.workflowPointersVisible and "NEXT-STEP POINTERS ARE NOW SHOWN" or "NEXT-STEP POINTERS ARE NOW HIDDEN"
         menu.plan.lastResult = menu.notice
         menu.plan.lastState = "DISPLAY_UPDATED"
         rebuild(false)
     end
-    title[10]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
-    title[10].handlers.onClick = function() menu.onCloseElement("close") end
+    title[11]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
+    title[11].handlers.onClick = function() menu.onCloseElement("close") end
     local tabRow = header:addRow(true, { fixed = true })
     for index, tab in ipairs(tabs) do
         local properties = { active = true }
         if menu.page == tab.id then properties.bgColor = activeTabBackground end
         tabRow[index]:createButton(properties):setText(tab.label, { halign = "center" })
         tabRow[index].handlers.onClick = function()
+            if tab.id == "operationsmap" then
+                local intel, unlocated = buildOperationsIntel()
+                DebugError("[FOC][B050][MAP_HANDOFF] route=FOC_OPERATIONS_MAP helper_slots=0,0 intel=" .. tostring(#intel) .. " pirate=" .. tostring(#menu.mapPirateObservations) .. " patrol=" .. tostring(#menu.mapPatrolTraversals) .. " edges=" .. tostring(#menu.mapGateEdges) .. " unlocated=" .. tostring(unlocated) .. " return=FOC")
+                openNativeMenu("FOC_OperationsMap", { 0, 0, intel, unlocated, menu.operationsMap.window, nil, menu.mapPirateObservations, menu.mapPatrolTraversals, menu.mapGateEdges, menu.gameTime })
+                return
+            end
             menu.page = tab.id
             menu.activeTab = tab.id
             rebuild(true)
         end
     end
-    tabRow[10]:createButton({ active = true }):setText("REFRESH", { halign = "center" })
-    tabRow[10].handlers.onClick = function()
+    tabRow[11]:createButton({ active = true }):setText("REFRESH", { halign = "center" })
+    tabRow[11].handlers.onClick = function()
         menu.notice = "REFRESH REQUESTED - WAITING FOR AUTHORITATIVE MD FLEET AND QUEST-PROTECTION SNAPSHOTS"
         menu.plan.lastResult = menu.notice
         menu.plan.lastState = "REFRESH_PENDING"
@@ -1800,7 +1825,7 @@ local function createHeader(frame, width)
     local feedbackRow = header:addRow(false, { fixed = true })
     local feedback = menu.notice or "READY - CHOOSE AN ACTION"
     if #feedback > 180 then feedback = feedback:sub(1, 177) .. "..." end
-    feedbackRow[1]:setColSpan(10):createText("LAST ACTION: " .. feedback, {
+    feedbackRow[1]:setColSpan(11):createText("LAST ACTION: " .. feedback, {
         halign = "center",
         color = needsAction(feedback) and warningColor or passColor,
     })
@@ -2108,7 +2133,7 @@ local function fleetOrdersPane(tableWidget)
         actionRow(tableWidget, "Home sector", homeSectorName, function() chooseHomeOnMap(selected) end, true, homeSector and headingColor or warningColor)
         actionRow(tableWidget, "Choose home", "CHOOSE HOME POINT ON MAP", function() chooseHomeOnMap(selected) end, true, activeTabBackground)
         textRow(tableWidget, "Home point", homePointText(homeSector), homeSector and headingColor or warningColor)
-        textRow(tableWidget, "How to choose", "Open the map and move to any sector you have discovered. Right-click the exact spot the fleet should use as home. Choose SET AS FOC HOME POINT. FOC saves the sector and spot, then returns here. No orders are sent.", headingColor)
+        textRow(tableWidget, "How to choose", "Open the dedicated FOC map, pan or zoom to a discovered sector, then left-click the exact home point. FOC records that sector and position in the unsaved draft and returns here. Dragging still pans; Escape cancels; no order is sent.", headingColor)
         if menu.plan.lastState == "ACTION_REQUIRED_HOME" then
             actionRequired(tableWidget,
                 "FOC could not open the safe X4 Home-point choice.",
@@ -2681,6 +2706,137 @@ local function activityPage(tableWidget)
     end
 end
 
+buildOperationsIntel = function()
+    local sectors, order, unlocated = {}, {}, 0
+    local function ensure(name, sectorID)
+        name = safeText(name, "UNKNOWN")
+        if name == "UNKNOWN" or name == "UNKNOWN SECTOR" then return nil end
+        if not sectors[name] then
+            sectors[name] = { name = name, id = sectorID and tostring(sectorID) or nil, score = 0, events = {}, fleets = {}, homes = {}, critical = 0, degraded = 0 }
+            order[#order + 1] = sectors[name]
+        elseif sectorID and not sectors[name].id then
+            sectors[name].id = tostring(sectorID)
+        end
+        return sectors[name]
+    end
+    local fleetIndex = {}
+    for _, fleet in ipairs(menu.sample and menu.sample.fleets or {}) do
+        local sector = ensure(fleet.commander.sector, fleet.commander.sectorID)
+        if sector then
+            sector.fleets[#sector.fleets + 1] = fleet.commander.fleetname
+            if fleet.status == "CRITICAL" then sector.score = sector.score + 5; sector.critical = sector.critical + 1
+            elseif fleet.status == "DEGRADED" then sector.score = sector.score + 2; sector.degraded = sector.degraded + 1 end
+        end
+        fleetIndex[#fleetIndex + 1] = { name = string.lower(fleet.commander.name), sector = fleet.commander.sector }
+        fleetIndex[#fleetIndex + 1] = { name = string.lower(fleet.commander.fleetname), sector = fleet.commander.sector }
+        for _, member in ipairs(fleet.members or {}) do fleetIndex[#fleetIndex + 1] = { name = string.lower(member.name), sector = member.sector } end
+        local home = menu.homeSectorByFleet[fleetKey(fleet)]
+        local homeSector = home and ensure(home.text)
+        if homeSector then homeSector.homes[#homeSector.homes + 1] = fleet.commander.fleetname end
+    end
+    local now = tonumber(menu.gameTime) or 0
+    for _, entry in ipairs(menu.liveActivity or {}) do if tonumber(entry.time) and entry.time > now then now = entry.time end end
+    local cutoff = tonumber(menu.operationsMap.window) or 60
+    for _, observation in ipairs(menu.mapPirateObservations or {}) do
+        local ageMinutes = math.max(0, (now - (tonumber(observation.time) or now)) / 60)
+        if ageMinutes <= cutoff then
+            local located = ensure(observation.sectorName, observation.sector)
+            if located then
+                local weight = observation.severity == "RED_DAMAGE" and 5 or 2
+                located.score = located.score + weight
+                located.events[#located.events + 1] = {
+                    time = observation.time, kind = "PIRATE_ACTIVITY", state = "OBSERVED",
+                    subject = observation.attacker, detail = observation.faction .. " attack observed in " .. observation.sectorName,
+                    severity = observation.severity,
+                }
+            end
+        end
+    end
+    for _, traversal in ipairs(menu.mapPatrolTraversals or {}) do
+        local ageMinutes = math.max(0, (now - (tonumber(traversal.time) or now)) / 60)
+        if ageMinutes <= cutoff then
+            local fromSector = ensure(traversal.fromName, traversal.from)
+            local toSector = ensure(traversal.toName, traversal.to)
+            if fromSector then fromSector.fleets[#fromSector.fleets + 1] = traversal.commander end
+            if toSector then toSector.fleets[#toSector.fleets + 1] = traversal.commander end
+        end
+    end
+    for _, entry in ipairs(menu.liveActivity or {}) do
+        local ageMinutes = math.max(0, (now - (tonumber(entry.time) or now)) / 60)
+        if ageMinutes <= cutoff then
+            local haystack = string.lower(safeText(entry.subject, "") .. " " .. safeText(entry.detail, ""))
+            local located
+            for _, candidate in ipairs(fleetIndex) do
+                if candidate.name ~= "" and haystack:find(candidate.name, 1, true) then located = ensure(candidate.sector); if located then break end end
+            end
+            if not located then
+                for _, candidate in ipairs(order) do
+                    if haystack:find(string.lower(candidate.name), 1, true) then located = candidate; break end
+                end
+            end
+            if located then
+                local weight = entry.severity == "RED_DAMAGE" and 5 or entry.severity == "YELLOW_DISTRESS" and 2 or 0
+                located.score = located.score + weight
+                located.events[#located.events + 1] = entry
+            elseif entry.severity == "RED_DAMAGE" or entry.severity == "YELLOW_DISTRESS" then
+                unlocated = unlocated + 1
+            end
+        end
+    end
+    table.sort(order, function(a, b) if a.score ~= b.score then return a.score > b.score end return a.name < b.name end)
+    return order, unlocated
+end
+
+local function operationsMapPage(tableWidget)
+    section(tableWidget, "INTERACTIVE EXECUTIVE OPERATIONS MAP - SECTOR INTELLIGENCE BOARD")
+    textRow(tableWidget, "Boundary", "This is an FOC strategic board, not X4's native spatial map. Every cell comes from current fleet/home evidence and retained FOC observations; missing attribution stays UNKNOWN.", passColor)
+    dropdownRow(tableWidget, "Show", operationsMapFilters, menu.operationsMap.filter, function(value) menu.operationsMap.filter = tostring(value); menu.operationsMap.selected = nil; rebuild(true) end)
+    dropdownRow(tableWidget, "Observation window", operationsMapWindows, menu.operationsMap.window, function(value) menu.operationsMap.window = tonumber(value) or 60; menu.operationsMap.selected = nil; rebuild(true) end, " minutes")
+    local intel, unlocated = buildOperationsIntel()
+    local visible = {}
+    for _, sector in ipairs(intel) do
+        if menu.operationsMap.filter == "OVERVIEW" or (menu.operationsMap.filter == "PIRATE ACTIVITY" and sector.score > 0) or (menu.operationsMap.filter == "HEAVY PATROL ROUTES" and #sector.fleets > 0) or (menu.operationsMap.filter == "FLEET HOMES" and #sector.homes > 0) then visible[#visible + 1] = sector end
+    end
+    local matched = #visible
+    while #visible > 20 do table.remove(visible) end
+    textRow(tableWidget, "Readback", tostring(#visible) .. " OF " .. tostring(matched) .. " MATCHING SECTOR(S) SHOWN | TOP 20 BY RISK | " .. tostring(unlocated) .. " THREAT OBSERVATION(S) UNLOCATED AND NOT FABRICATED", unlocated > 0 and warningColor or passColor)
+    section(tableWidget, "SELECT A SECTOR")
+    if #visible == 0 then textRow(tableWidget, "Result", "NO SECTORS MATCH THIS FILTER AND OBSERVATION WINDOW", warningColor) end
+    for index = 1, #visible, 2 do
+        local row = tableWidget:addRow(true)
+        for slot = 0, 1 do
+            local sector = visible[index + slot]
+            if sector then
+                local level = sector.score >= 10 and "CRITICAL" or sector.score >= 4 and "HIGH" or sector.score > 0 and "ELEVATED" or "QUIET"
+                local bg = level == "CRITICAL" and failedActionBackground or level == "HIGH" and requiredActionBackground or level == "ELEVATED" and pointerActionBackground or confirmedActionBackground
+                local cell = slot == 0 and 1 or 3
+                row[cell]:setColSpan(2):createButton({ active = true, bgColor = bg }):setText(sector.name .. " | " .. level .. " | SCORE " .. tostring(sector.score) .. " | " .. tostring(#sector.events) .. " OBS", { halign = "center" })
+                row[cell].handlers.onClick = function() menu.operationsMap.selected = sector.name; menu.notice = "OPERATIONS MAP SECTOR SELECTED - " .. sector.name; rebuild(false) end
+            end
+        end
+    end
+    local selected
+    for _, sector in ipairs(intel) do if sector.name == menu.operationsMap.selected then selected = sector; break end end
+    if not selected and visible[1] then selected = visible[1]; menu.operationsMap.selected = selected.name end
+    section(tableWidget, "SELECTED-SECTOR INTELLIGENCE")
+    if selected then
+        local level = selected.score >= 10 and "CRITICAL" or selected.score >= 4 and "HIGH" or selected.score > 0 and "ELEVATED" or "QUIET"
+        textRow(tableWidget, "Sector", selected.name .. " | THREAT " .. level .. " | SCORE " .. tostring(selected.score), selected.score >= 10 and criticalColor or selected.score > 0 and warningColor or passColor)
+        textRow(tableWidget, "Fleet presence", #selected.fleets > 0 and table.concat(selected.fleets, ", ") or "NO CURRENT FOC FLEET EVIDENCE", #selected.fleets > 0 and headingColor or neutralColor)
+        textRow(tableWidget, "Saved home coverage", #selected.homes > 0 and table.concat(selected.homes, ", ") or "NO SAVED FOC HOME IN THIS SECTOR", #selected.homes > 0 and passColor or neutralColor)
+        textRow(tableWidget, "Readiness", tostring(selected.critical) .. " CRITICAL | " .. tostring(selected.degraded) .. " DEGRADED", selected.critical > 0 and criticalColor or selected.degraded > 0 and warningColor or passColor)
+        for index = 1, math.min(4, #selected.events) do
+            local entry = selected.events[index]
+            textRow(tableWidget, "Observation " .. tostring(index), entry.kind .. " | " .. entry.state .. " | " .. entry.subject .. "\n" .. entry.detail, entry.severity == "RED_DAMAGE" and criticalColor or warningColor)
+        end
+    else
+        textRow(tableWidget, "Sector", "NO SECTOR SELECTED", neutralColor)
+    end
+    buttonPairRow(tableWidget, "OPEN ACTIVITY EVIDENCE", function() menu.page = "activity"; menu.activeTab = "activity"; rebuild(true) end,
+        "OPEN FLEET RESPONSE", function() menu.page = "response"; menu.activeTab = "response"; rebuild(true) end,
+        headingColor, true, true)
+end
+
 local function configureColumns(tableWidget, width)
     local columnWidth = math.floor((width - 4 * Helper.borderSize) / 4)
     tableWidget:setColWidth(1, columnWidth, false)
@@ -2735,6 +2891,7 @@ function menu.create()
     elseif menu.page == "store" then academyStorePage(tableWidget)
     elseif menu.page == "response" then responsePage(tableWidget)
     elseif menu.page == "activity" then activityPage(tableWidget)
+    elseif menu.page == "operationsmap" then operationsMapPage(tableWidget)
     else settingsPage(tableWidget) end
     if menu.restoreTopRow then pcall(tableWidget.setTopRow, tableWidget, menu.restoreTopRow) end
     menu.restoreTopRow = nil
@@ -2802,16 +2959,20 @@ function menu.onShowMenu()
         menu.operations.maxFleetSize = tonumber(policy[8]) or 100
         menu.operations.preset = tostring(policy[9] or "MANUAL ORDERS ONLY")
     end
+    menu.gameTime = tonumber(menu.param[25]) or menu.gameTime or 0
+    if type(menu.param[26]) == "table" then loadMapPirateObservations(menu.param[26]) end
+    if type(menu.param[27]) == "table" then loadMapPatrolTraversals(menu.param[27]) end
+    if type(menu.param[28]) == "table" then loadMapGateEdges(menu.param[28]) end
     if authoritativeDraftRows and restoredDrafts > 0 then
         menu.notice = "RESTORED " .. tostring(restoredDrafts) .. " SAVED FLEET DRAFT(S) FROM THE GAME SAVE"
-        DebugError("[FOC][B040][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
+        DebugError("[FOC][B048][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=" .. tostring(restoredDrafts) .. " mutation=NONE")
     elseif authoritativeDraftRows then
-        DebugError("[FOC][B040][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
+        DebugError("[FOC][B048][DRAFT_RESTORE] schema=3_or_4 ownership=MD_NATIVE_OBJECT restored=0 reason=NO_SAVED_DRAFTS mutation=NONE")
     end
     if menu.pendingHomeSelection then
         menu.pendingHomeSelection = nil
         menu.homeReturnMetadata = nil
-        menu.plan.lastResult = "HOME POINT NOT CHANGED - MAP CLOSED WITHOUT CHOOSING SET AS FOC HOME POINT"
+        menu.plan.lastResult = "HOME POINT NOT CHANGED - FOC MAP CLOSED WITHOUT SELECTING A POINT"
     end
     menu.page = menu.page or "command"
     sampleFleets("OPEN")
@@ -2846,7 +3007,7 @@ local function init()
     if Helper and Helper.registerMenu then
         Helper.registerMenu(menu)
     else
-        DebugError("[FOC][B040][LUA_ERROR] Helper.registerMenu unavailable")
+        DebugError("[FOC][B048][LUA_ERROR] Helper.registerMenu unavailable")
     end
     RegisterEvent(menu.name .. ".draft.key", draftKeyReceived)
     RegisterEvent(menu.name .. ".draft.result", draftResultReceived)
@@ -2862,6 +3023,7 @@ local function init()
     RegisterEvent(menu.name .. ".activity.subject", liveActivitySubject)
     RegisterEvent(menu.name .. ".activity.detail", liveActivityDetail)
     RegisterEvent(menu.name .. ".activity.severity", liveActivitySeverity)
+    RegisterEvent(menu.name .. ".activity.now", liveActivityNow)
     RegisterEvent(menu.name .. ".activity.row.commit", liveActivityCommit)
     RegisterEvent(menu.name .. ".structural.snapshot.begin", menu.structuralSnapshotBegin)
     RegisterEvent(menu.name .. ".roadmap.begin", menu.roadmapBegin)

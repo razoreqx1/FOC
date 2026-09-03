@@ -1,11 +1,30 @@
-Fleet Operations Command - Build 040 / version 139
+Fleet Operations Command - Build 050 / version 149
 
 Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
 
-Build 040 corrects the shared click acknowledgement so it never overwrites a
+Build 050 keeps the Operations Map analysis dropdown open while it owns input.
+Hover intelligence refreshes are deferred until the dropdown closes, preventing
+the overlay rebuild from destroying the option list before a choice can be made.
+
+Build 049 adds cell-hover intelligence, filter-driven FOC route analysis, and
+a dedicated FOC location-marking mode. Fleet Home no longer opens X4's ordinary
+map. Pirate colors use real pirate-tagged attacks; heavy patrol colors use only
+observed adjacent-sector traversals by enrolled FOC fleets. Neutral native
+connections remain visible when the selected filter has no report. Numeric
+Helper state remains in positions 1 and 2, and all map evidence remains bounded.
+
+Build 041 adds the first practical Interactive Executive Operations Map: a
+clickable sector intelligence board built from current fleet/home evidence and
+FOC's retained observations. Working filters select all sectors, threats, or
+fleet homes across 15, 60, or 180-minute windows. Selecting a sector opens its
+real readiness, coverage, and recent-event evidence, with working links to
+Activity and Fleet Response. Unknown locations are counted but never invented.
+This is an honest strategic board, not a clone of X4's private native 3D map.
+
+Build 040 corrected the shared click acknowledgement so it never overwrites a
 successful preview state before a guarded approval runs. This restores Marine
 and Captain preview-to-transfer workflows while preserving immediate feedback.
-The visible menu identity is also corrected to Build 040 / version 139.
+The visible menu identity was also corrected to Build 040 / version 139.
 
 Build 039 added a fixed, always-visible LAST ACTION line so operational buttons
 immediately acknowledge a click and MD/native actions replace that message with

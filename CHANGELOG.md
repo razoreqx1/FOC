@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.49 — Build 050 — 2026-09-03
+
+### Historical Intelligence Map
+
+- Added a dedicated full-screen FOC Historical Intelligence Map instead of handing location work to the ordinary X4 map.
+- Added native holomap pan, right-drag rotation, wheel zoom, reset, Back, Escape, hover, and sector-selection behavior.
+- Added hover intelligence for retained risk, enrolled-fleet presence, saved Fleet Homes, readiness, recent observations, and honestly unlocated threats.
+
+### Exact FOC location marking
+
+- Added request-scoped left-click location marking for exact Fleet Home coordinates and future FOC workflows that request a map point.
+- Preserved the selected fleet and unsaved draft across the map handoff and return.
+- Kept selection non-mutating: cancelling returns no location, and choosing a point sends no order.
+
+### Evidence-based route analysis
+
+- Added Pirate Activity and Heavy Patrol Routes filters over a bounded historical observation window.
+- Added yellow, amber, and red route strokes based on retained FOC evidence rather than faction ownership.
+- Retained neutral native gate lines when no qualifying report exists and explicitly avoided treating missing evidence as safety.
+
+### Stability
+
+- Stabilized the analysis dropdown so hover redraws do not close it before selection.
+- Preserved bounded observation retention and one 30-second enrolled-fleet traversal sampler.
+- Corrected the visible and packaged release identity to Build 050 / extension version 149.
+
 ## v1.39 — Build 040 — 2026-09-02
 
 ### Fleet planning and task forces
