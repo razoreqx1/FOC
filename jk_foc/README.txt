@@ -1,6 +1,18 @@
-Fleet Operations Command - Build 055 / version 154
+Fleet Operations Command - Build 056 / version 155
 
 Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
+
+Build 056 replaces diagnostic-only Session History with paged recorded activity.
+Both views use the same save-persistent latest 50 events, including yellow distress
+and red damage events. Refresh reloads a complete snapshot without duplicating IDs.
+Detection, response, and resolution are separate events, not duplicate imports.
+Older pages retain their window and show a newer-entry count; page 1 shows newest.
+New distress detections record the exact subject and sector. Click its history
+button to inspect the current subject in X4's live map without sending orders.
+If the subject has disappeared, the button opens its recorded sector, not an
+invented battle position. Legacy records without identity remain readable with
+their map button disabled. Back restores the history view and scroll position.
+Repair automation is deferred. This TEST package is not installed or published.
 
 Build 055 restores saved carrier wing settings by exact carrier ID and group.
 The Saved wing row shows persistent readback separately from the editable draft.
@@ -287,7 +299,7 @@ Preserved safety boundaries
   fleet are displayed. Saved-plan application is capped at 100 Draft records;
   Academy bulk assignment remains capped at 25 exact pairs per approval.
 - Live Activity remains save-persistent with 50 retained and 12 displayed rows.
-  Session History remains session-only and bounded.
+  Session History now pages that same retained operational event archive.
 - Repair handoff itself mutates nothing. Rebuild confirmation is a native async
   request and does not claim queued/building/completed state without refresh.
 - No live installation, promotion, publication, or push is performed by this

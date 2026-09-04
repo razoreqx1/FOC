@@ -254,7 +254,7 @@ local function drawRouteStrokes()
             if ok1 and line1 and ok2 and line2 then marked = marked + 1 end
         end
     end
-    DebugError("[FOC][B055][ROUTE_DRAW] filter=" .. menu.analysisFilter .. " evidence_edges=" .. tostring(#ordered) .. " visible_strokes=" .. tostring(drawn) .. " evidence_sector_markers=" .. tostring(marked) .. " colors=FILTER_NOT_FACTION neutral_native_routes=VISIBLE")
+    DebugError("[FOC][B056][ROUTE_DRAW] filter=" .. menu.analysisFilter .. " evidence_edges=" .. tostring(#ordered) .. " visible_strokes=" .. tostring(drawn) .. " evidence_sector_markers=" .. tostring(marked) .. " colors=FILTER_NOT_FACTION neutral_native_routes=VISIBLE")
 end
 
 local function startRouteScan(delay)
@@ -718,13 +718,13 @@ function menu.onRenderTargetSelect()
             end
             local pickedname = picked and componentName(picked) or nil
             if picked and isobject and not isplayerowned and pickedname and parent and parent.operationsMapTargetSelected then
-                DebugError("[FOC][B055][MAP_TARGET] component=" .. tostring(picked) .. " name=" .. pickedname .. " known_pick=1 player_owned=0 callback=FOC_Menu")
+                DebugError("[FOC][B056][MAP_TARGET] component=" .. tostring(picked) .. " name=" .. pickedname .. " known_pick=1 player_owned=0 callback=FOC_Menu")
                 menu.leftdown = nil
                 parent.operationsMapTargetSelected(menu, menu.request, { tostring(picked), pickedname })
                 return
             end
             menu.notice = "TARGET NOT MARKED - CLICK A KNOWN NON-PLAYER OBJECT ICON"
-            DebugError("[FOC][B055][MAP_TARGET_BLOCKED] picked=" .. tostring(picked or 0) .. " object=" .. tostring(isobject == true) .. " player_owned=" .. tostring(isplayerowned))
+            DebugError("[FOC][B056][MAP_TARGET_BLOCKED] picked=" .. tostring(picked or 0) .. " object=" .. tostring(isobject == true) .. " player_owned=" .. tostring(isplayerowned))
         elseif resolved and menu.request then
             local parent = menuByName("FOC_Menu")
             if parent and parent.operationsMapLocationSelected then

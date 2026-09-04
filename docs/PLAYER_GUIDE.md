@@ -1,8 +1,8 @@
-# Fleet Operations Command v1.54 - Complete Player Guide
+# Fleet Operations Command v1.55 - Complete Player Guide
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 
-**Applies to:** Fleet Operations Command v1.54, Build 055
+**Applies to:** Fleet Operations Command v1.54, Build 056
 
 **Game:** X4: Foundations
 
@@ -10,7 +10,7 @@
 
 FOC is designed to be safe. It explains what it found, what it plans to do, and why an action was allowed or blocked. You stay in command.
 
-Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. The text in this guide is current for Build 055, including the dedicated FOC Historical Intelligence Map introduced in v1.49 and the Strategic Ops additions in v1.54.
+Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. The text in this guide is current for Build 056, including the dedicated FOC Historical Intelligence Map introduced in v1.49 and the Strategic Ops additions in v1.54.
 
 ---
 
@@ -835,3 +835,13 @@ Before reporting a problem, take a screenshot of the complete FOC page and write
 ---
 
 **FOC watches. You command.**
+
+## 21. Session History and live map inspection (v1.55)
+
+Open **Activity -> Session History** to browse the latest 50 saved operational events, including yellow distress alerts and red damage events. This uses the same retained event archive as Live Activity, rather than diagnostic refresh summaries. Detection, response, and resolution are distinct events.
+
+Select **Refresh** to retrieve current retained events. Repeated refreshes do not duplicate event IDs; incomplete updates do not replace a complete list. Older pages retain their current window while new events arrive. Return to page one to see the newest entries.
+
+New distress detections record the exact subject and sector. Select an available history map button to open the live native X4 map on that subject. If the subject no longer exists, its recorded sector opens when available. This is current live inspection, not a replay or a guaranteed battle position. Older records without stored identity remain readable, with map navigation disabled. Use native Back to return to the history view.
+
+Opening the map does not send orders, apply profiles, or spend credits. Existing native repair controls are unchanged; fully automatic Repair and Return is not included in this update.

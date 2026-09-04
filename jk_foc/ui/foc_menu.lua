@@ -246,6 +246,7 @@ local function loadLiveActivityRows(rows)
                     kind = safeText(row[4], "ACTIVITY"), state = safeText(row[5], "RECORDED"),
                     subject = safeText(row[6], "FOC"), detail = safeText(row[7], "No detail recorded."),
                     severity = activitySeverity(row[4], row[7], row[8]),
+                    target = row[9], targetid = tostring(row[10] or ""), sector = row[11],
                 }
             end
         end
@@ -712,7 +713,7 @@ function menu.operationsMapLocationSelected(childMenu, request, value)
     menu.pendingHomeSelection = nil
     menu.homeReturnMetadata = nil
     if childMenu and childMenu.name == "FOC_OperationsMap" then
-        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 154, "FOC Build 055", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
+        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 155, "FOC Build 056", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult, nil, nil, menu.restoreFleetKey })
         if childMenu.cleanup then childMenu.cleanup() end
     end
 end
@@ -726,7 +727,7 @@ function menu.operationsMapTargetSelected(childMenu, request, value)
     end
     menu.pendingHomeSelection = nil
     if childMenu and childMenu.name == "FOC_OperationsMap" then
-        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 154, "FOC Build 055", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult })
+        Helper.closeMenuAndOpenNewMenu(childMenu, menu.name, { 0, 0, 155, "FOC Build 056", "RUNTIME ACCEPTANCE REQUIRED", menu.plan.authority, menu.plan.lastResult })
         if childMenu.cleanup then childMenu.cleanup() end
     end
 end
@@ -1310,7 +1311,7 @@ function menu.openFleetInspection(expectedKey)
         view = menu.strategic.view, group = menu.strategic.group, role = menu.strategic.wingRole,
         damage = menu.strategic.damageHull, notice = menu.notice, result = menu.plan.lastResult,
         state = menu.plan.lastState, top = top }
-    DebugError("[FOC][B055][NATIVE_MAP] stage=REQUESTED subject=" .. selected.commander.idcode .. " orders_sent=0")
+    DebugError("[FOC][B056][NATIVE_MAP] stage=REQUESTED subject=" .. selected.commander.idcode .. " orders_sent=0")
     openNativeMenu("MapMenu", { 0, 0, true, luaid, nil, "infomode", { "info", luaid } })
 end
 
@@ -1318,10 +1319,62 @@ function menu.onSaveState()
     if menu.nativeMapReturn then return { nativeInspection = true } end
 end
 
+function menu.historyMapButton(row, entry, color, enabled, sectorOnly)
+    local eventID = entry.id
+    row[1]:createButton({ active = enabled }):setText("EVENT " .. tostring(eventID) .. (sectorOnly and " - SECTOR" or " - MAP"), { color = color })
+    row[1].handlers.onClick = function() menu.openHistoryInspection(eventID) end
+end
+
+function menu.historyRows()
+    -- Freeze older pages by stable event ID. Returning to page one admits new rows.
+    if not menu.historyWindow or (tonumber(menu.listPages["activity.history"]) or 1) == 1 then
+        menu.historyWindow = {}
+        for _, entry in ipairs(menu.liveActivity) do menu.historyWindow[#menu.historyWindow + 1] = entry end
+    end
+    local retained, newer = {}, 0
+    for _, entry in ipairs(menu.historyWindow) do retained[entry.id] = true end
+    for _, entry in ipairs(menu.liveActivity) do if not retained[entry.id] then newer = newer + 1 end end
+    return menu.historyWindow, newer
+end
+
+function menu.historyTarget(entry)
+    local target = entry and bridgeComponent64(entry.target)
+    if target and entry.targetid and entry.targetid ~= "" and GetComponentData(target, "idcode") == entry.targetid then
+        return componentLuaID(target), false
+    end
+    local sector = entry and bridgeComponent64(entry.sector)
+    if sector then return componentLuaID(sector), true end
+end
+
+function menu.openHistoryInspection(expectedID)
+    if not menu.frame or menu.closeInProgress or menu.pendingActionKind or menu.carrierTransaction then return end
+    local entry
+    for _, candidate in ipairs(menu.historyWindow or {}) do if candidate.id == expectedID then entry = candidate; break end end
+    local luaid, sectorOnly = menu.historyTarget(entry)
+    if not luaid then menu.notice = "HISTORY MAP UNAVAILABLE - NO SURVIVING RECORDED SUBJECT OR SECTOR"; rebuild(false); return end
+    local top
+    if menu.mainTable and menu.mainTable.id then
+        local ok, value = pcall(GetTopRow, menu.mainTable.id)
+        if ok then top = value end
+    end
+    menu.nativeMapReturn = { history = true, page = menu.page, activeTab = menu.activeTab,
+        activityView = menu.activityView, top = top, notice = menu.notice }
+    DebugError("[FOC][B056][HISTORY_MAP] event=" .. tostring(expectedID) .. " sector_only=" .. tostring(sectorOnly) .. " orders_sent=0")
+    if sectorOnly then openNativeMenu("MapMenu", { 0, 0, true, luaid })
+    else openNativeMenu("MapMenu", { 0, 0, true, luaid, nil, "infomode", { "info", luaid } }) end
+end
+
 function menu.restoreFleetInspection(state)
     local saved = menu.nativeMapReturn
     menu.nativeMapReturn = nil
     if not saved or type(state) ~= "table" or state.nativeInspection ~= true then return false end
+    if saved.history then
+        menu.page, menu.activeTab, menu.activityView = saved.page, saved.activeTab, saved.activityView
+        menu.notice, menu.restoreTopRow = saved.notice, saved.top
+        menu.create()
+        AddUITriggeredEvent(menu.name, "activity_snapshot", nil)
+        return true
+    end
     menu.page, menu.activeTab = saved.page, saved.activeTab
     menu.strategic.view, menu.strategic.group = saved.view, saved.group
     menu.strategic.wingRole, menu.strategic.damageHull = saved.role, saved.damage
@@ -1334,7 +1387,7 @@ function menu.restoreFleetInspection(state)
     if menu.selectedFleet == 0 then menu.notice = "MAP RETURN - ORIGINAL FLEET UNAVAILABLE; CHOOSE A FLEET" end
     menu.restoreTopRow = saved.top
     AddUITriggeredEvent(menu.name, "strategic_refresh", nil)
-    DebugError("[FOC][B055][NATIVE_MAP] stage=RETURNED fleet_resolved=" .. tostring(menu.selectedFleet ~= 0) .. " draft_preserved=1 orders_sent=0")
+    DebugError("[FOC][B056][NATIVE_MAP] stage=RETURNED fleet_resolved=" .. tostring(menu.selectedFleet ~= 0) .. " draft_preserved=1 orders_sent=0")
     menu.create()
     return true
 end
@@ -1574,7 +1627,7 @@ local function liveActivityRow()
 end
 
 local function liveActivityID(_, value) liveActivityRow().id = tonumber(value) end
-local function liveActivityTime(_, value) liveActivityRow().time = tonumber(value) or 0 end
+local function liveActivityTime(_, value) liveActivityRow().time = tonumber(value) end
 local function liveActivityKind(_, value) liveActivityRow().kind = safeText(value, "ACTIVITY") end
 local function liveActivityState(_, value) liveActivityRow().state = safeText(value, "RECORDED") end
 local function liveActivitySubject(_, value) liveActivityRow().subject = safeText(value, "FOC") end
@@ -1584,14 +1637,44 @@ local function liveActivityNow(_, value) menu.gameTime = tonumber(value) or menu
 local function liveActivityCommit()
     local row = menu.liveActivityIncoming
     menu.liveActivityIncoming = nil
-    if not row or not row.id or not row.kind or not row.state or not row.subject or not row.detail then return end
+    if not row or not row.id or row.id < 1 or row.id % 1 ~= 0 or not row.time or not row.kind or not row.state or not row.subject or not row.detail or not row.severity then
+        if menu.activitySnapshot then menu.activitySnapshot.invalid = true end
+        return
+    end
     row.severity = activitySeverity(row.kind, row.detail, row.severity)
+    if menu.activitySnapshot then
+        local snapshot = menu.activitySnapshot
+        if snapshot.ids[row.id] or #snapshot.rows >= LIVE_ACTIVITY_LIMIT then snapshot.invalid = true; return end
+        snapshot.ids[row.id] = true
+        snapshot.rows[#snapshot.rows + 1] = row
+        return
+    end
     for index = #menu.liveActivity, 1, -1 do
         if menu.liveActivity[index].id == row.id then table.remove(menu.liveActivity, index) end
     end
     table.insert(menu.liveActivity, 1, row)
     while #menu.liveActivity > LIVE_ACTIVITY_LIMIT do table.remove(menu.liveActivity) end
     if menu.frame and menu.page == "activity" and menu.activityView == "live" then rebuild(false) end
+end
+
+function menu.activityTarget(_, value) liveActivityRow().target = value end
+function menu.activityTargetID(_, value) liveActivityRow().targetid = tostring(value or "") end
+function menu.activitySector(_, value) liveActivityRow().sector = value end
+
+function menu.activitySnapshotBegin(_, expected)
+    menu.liveActivityIncoming = nil
+    menu.activitySnapshot = { expected = tonumber(expected), rows = {}, ids = {} }
+end
+
+function menu.activitySnapshotComplete()
+    local snapshot = menu.activitySnapshot
+    if snapshot and menu.liveActivityIncoming then snapshot.invalid = true end
+    menu.activitySnapshot, menu.liveActivityIncoming = nil, nil
+    if not snapshot or snapshot.invalid or not snapshot.expected or snapshot.expected < 0 or snapshot.expected > LIVE_ACTIVITY_LIMIT or #snapshot.rows ~= snapshot.expected then return end
+    if snapshot.expected == 0 and #menu.liveActivity > 0 then return end
+    table.sort(snapshot.rows, function(a, b) return a.id > b.id end)
+    menu.liveActivity = snapshot.rows
+    if menu.frame and menu.page == "activity" then rebuild(false) end
 end
 
 local function academySnapshotBegin(_, expected)
@@ -2231,7 +2314,7 @@ function menu.carrierEditor(subject, group)
     local signature = status .. ":" .. tostring(saved and saved[5]) .. ":" .. draft.role .. ":" .. tostring(draft.damage) .. ":" .. tostring(draft.dirty)
     if draft.logged ~= signature then
         draft.logged = signature
-        DebugError("[FOC][B055][CARRIER_EDITOR] subject=" .. tostring(subject) .. " group=" .. tostring(group) .. " saved_role=" .. tostring(saved and saved[4] or "UNKNOWN") .. " saved_recall=" .. tostring(saved and saved[5] or "UNKNOWN") .. " draft_recall=" .. tostring(draft.damage) .. " dirty=" .. tostring(draft.dirty) .. " status=" .. status)
+        DebugError("[FOC][B056][CARRIER_EDITOR] subject=" .. tostring(subject) .. " group=" .. tostring(group) .. " saved_role=" .. tostring(saved and saved[4] or "UNKNOWN") .. " saved_recall=" .. tostring(saved and saved[5] or "UNKNOWN") .. " draft_recall=" .. tostring(draft.damage) .. " dirty=" .. tostring(draft.dirty) .. " status=" .. status)
     end
     return draft, saved, status
 end
@@ -2329,7 +2412,7 @@ function menu.carrierReplyComplete()
     menu.carrierTransaction = nil
     menu.pendingActionKind = nil
     menu.plan.lastState, menu.plan.lastResult, menu.notice = state, result, result
-    DebugError("[FOC][B055][CARRIER_RESULT] token=" .. transaction.token .. " subject=" .. tostring(transaction.subject) .. " state=" .. state .. " result=" .. result)
+    DebugError("[FOC][B056][CARRIER_RESULT] token=" .. transaction.token .. " subject=" .. tostring(transaction.subject) .. " state=" .. state .. " result=" .. result)
     if menu.frame then sampleFleets("CARRIER FINAL READBACK"); rebuild(false) end
 end
 
@@ -3139,7 +3222,7 @@ end
 
 local function activityPage(tableWidget)
     buttonPairRow(tableWidget, "LIVE ACTIVITY", function() menu.activityView = "live"; rebuild(false) end,
-        "SESSION HISTORY", function() menu.activityView = "history"; rebuild(false) end,
+        "SESSION HISTORY", function() menu.activityView = "history"; AddUITriggeredEvent(menu.name, "activity_snapshot", nil); rebuild(false) end,
         menu.activityView == "history" and passColor or headingColor, true, true)
     if menu.activityView == "live" then
         section(tableWidget, "LIVE ACTIVITY - NEWEST FIRST")
@@ -3168,16 +3251,21 @@ local function activityPage(tableWidget)
             if report then textRow(tableWidget, "REPORT " .. tostring(report[1]), "Victim: " .. safeText(report[5], "UNKNOWN") .. " | Attacker: " .. safeText(report[6], "UNKNOWN") .. " | Fleet: " .. safeText(report[7], "UNKNOWN") .. "\nOutcome: " .. safeText(report[8], "UNKNOWN") .. " | Losses: " .. safeText(report[9], "UNKNOWN") .. " | Damage: " .. safeText(report[10], "UNKNOWN"), neutralColor) end
         end
     else
-        section(tableWidget, "BOUNDED SESSION HISTORY")
-        local first, last = addPager(tableWidget, "activity.history", #menu.history, { fixedRows = 8, rowUnits = 3, contentPixels = menu.listContentHeight, maximum = 8 })
+        section(tableWidget, "SESSION HISTORY - RECORDED ACTIVITY")
+        local rows, newer = menu.historyRows()
+        textRow(tableWidget, "Retention", "Latest 50 events saved | Refresh reloads events, not diagnostics | " .. tostring(newer) .. " newer entries: return to page 1", headingColor)
+        local first, last = addPager(tableWidget, "activity.history", #rows, { fixedRows = 10, rowUnits = 8, contentPixels = menu.listContentHeight, maximum = 8 })
+        if #rows == 0 then textRow(tableWidget, "History", "NO RECORDED ACTIVITY YET", neutralColor) end
         for index = first, last do
-            local entry = menu.history[index]
+            local entry = rows[index]
             if entry then
-            local row = tableWidget:addRow(false)
-            row[1]:createText("ACTIVITY " .. tostring(index))
-            row[2]:createText(entry.reason)
-            row[3]:createText("Session time: " .. string.format("%.1f", tonumber(entry.time) or 0))
-            row[4]:createText("Fleets: " .. tostring(entry.fleetCount) .. " | Missing captains: " .. tostring(entry.missingCaptains) .. " | State: " .. tostring(entry.state or "RECORDED") .. "\n" .. safeText(entry.result, "No additional result recorded."), { wordwrap = true, color = needsAction(entry.result) and warningColor or passColor })
+                local color = entry.severity == "RED_DAMAGE" and criticalColor or entry.severity == "YELLOW_DISTRESS" and warningColor or neutralColor
+                local luaid, sectorOnly = menu.historyTarget(entry)
+                local row = tableWidget:addRow(true)
+                menu.historyMapButton(row, entry, color, luaid ~= nil and not menu.pendingActionKind and not menu.carrierTransaction, sectorOnly)
+                row[2]:createText(formatGameTime(entry.time) .. "\n" .. entry.kind:sub(1, 40) .. " | " .. entry.state:sub(1, 64), { color = color, wordwrap = true })
+                row[3]:createText(entry.subject:sub(1, 80) .. (luaid and "" or "\nMap identity unavailable"), { color = color, wordwrap = true })
+                row[4]:createText(entry.detail:sub(1, 240) .. (#entry.detail > 240 and "..." or ""), { wordwrap = true, color = color })
             end
         end
     end
@@ -3387,6 +3475,8 @@ end
 function menu.onShowMenu(state)
     -- Native Helper return must not replay the older MD launch snapshot over drafts.
     if menu.restoreFleetInspection(state) then return end
+    menu.historyWindow, menu.activitySnapshot, menu.liveActivityIncoming = nil, nil, nil
+    menu.listPages["activity.history"] = 1
     menu.param = menu.param or {}
     menu.param[1] = tonumber(menu.param[1]) or 0
     menu.param[2] = tonumber(menu.param[2]) or 0
@@ -3465,6 +3555,7 @@ function menu.onShowMenu(state)
     AddUITriggeredEvent(menu.name, "strategic_refresh", nil)
     if menu.page == "taskforces" and menu.plan.lastResult then menu.notice = menu.plan.lastResult end
     menu.create()
+    AddUITriggeredEvent(menu.name, "activity_snapshot", nil)
 end
 
 function menu.onCloseElement(reason, layer)
@@ -3588,7 +3679,7 @@ function menu.carrierAutomation(_, value)
         end
     end
     AddUITriggeredEvent(menu.name, "carrier_automation_readback", { tostring(value[5] or ""), group or 0, action, assignment, success and "CONFIRMED" or "BLOCKED" })
-    DebugError("[FOC][B055][CARRIER_AUTOMATION] carrier=" .. tostring(value[1]) .. " group=" .. tostring(group) .. " action=" .. action .. " assignment=" .. assignment .. " readback=" .. (success and "CONFIRMED" or "BLOCKED"))
+    DebugError("[FOC][B056][CARRIER_AUTOMATION] carrier=" .. tostring(value[1]) .. " group=" .. tostring(group) .. " action=" .. action .. " assignment=" .. assignment .. " readback=" .. (success and "CONFIRMED" or "BLOCKED"))
 end
 function menu.carrierAutomationBegin() menu.carrierAutomationIncoming = {} end
 function menu.carrierAutomationValue(index, value)
@@ -3629,6 +3720,11 @@ local function init()
     RegisterEvent(menu.name .. ".activity.severity", liveActivitySeverity)
     RegisterEvent(menu.name .. ".activity.now", liveActivityNow)
     RegisterEvent(menu.name .. ".activity.row.commit", liveActivityCommit)
+    RegisterEvent(menu.name .. ".activity.target", menu.activityTarget)
+    RegisterEvent(menu.name .. ".activity.targetid", menu.activityTargetID)
+    RegisterEvent(menu.name .. ".activity.sector", menu.activitySector)
+    RegisterEvent(menu.name .. ".activity.snapshot.begin", menu.activitySnapshotBegin)
+    RegisterEvent(menu.name .. ".activity.snapshot.complete", menu.activitySnapshotComplete)
     RegisterEvent(menu.name .. ".structural.snapshot.begin", menu.structuralSnapshotBegin)
     RegisterEvent(menu.name .. ".roadmap.begin", menu.roadmapBegin)
     RegisterEvent(menu.name .. ".roadmap.force.begin", menu.roadmapForceBegin)

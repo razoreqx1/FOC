@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.55 — Build 056
+
+- NEW: Session History pages the retained operational archive, including yellow distress and red damage events.
+- NEW: Native X4 map inspection for new distress records with stored subject identity; recorded-sector fallback when the subject is gone.
+- NEW: Refresh-aware event deduplication and stable older-page browsing.
+- FIXED: Session History displaying diagnostic refresh summaries instead of operational alerts.
+- Updated the browser-readable player guide. Existing v1.54 PDF remains available.
+- Automatic Repair and Return remains outside this update.
+
 ## v1.54 — Build 055
 
 - Added Strategic Ops workspaces for Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
