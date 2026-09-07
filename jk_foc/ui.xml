@@ -2,6 +2,12 @@
 <addon name="fleet_operations_command" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../ui/core/addon.xsd">
   <environment type="menus">
     <dependency name="ego_detailmonitor" />
+    <file name="ui/foc_recovery.lua" />
+    <file name="ui/foc_construction.lua" />
+    <file name="ui/foc_npc_purchases.lua" />
+    <file name="ui/foc_advisor.lua" />
+    <file name="ui/foc_procurement.lua" />
+    <file name="ui/foc_plan.lua" />
     <file name="ui/foc_menu.lua" />
     <file name="ui/foc_access.lua" />
     <file name="ui/foc_operations_map.lua" />

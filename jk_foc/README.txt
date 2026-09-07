@@ -1,6 +1,184 @@
-Fleet Operations Command - Build 056 / version 155
+Fleet Operations Command - Build 072 / version 171 TEST candidate
 
-Status: IMPLEMENTED; RUNTIME ACCEPTANCE REQUIRED.
+Build 072 recovery order correction:
+- Explicit recovery can reconcile missing order history with only an empty-queue default Hold Position, never queued work or another assignment.
+- Review captures exact current orders; confirmation and delayed assembly preserve newer player changes. Historical order records remain intact.
+- Recovery diagnostics identify ship and order-check results. No second purchase or charge; actual in-game assembly remains RUNTIME ACCEPTANCE REQUIRED.
+
+Historical Build 071 purchase tracking and explicit recovery:
+- Retained order status no longer requires expired native task objects to cross into Lua.
+- New purchases retain an exact receipt/component link when native readback supplies it. Missing links never cause another payment or purchase.
+- CHECK PREPARED FLEET ORDER shows retained ships. REVIEW RETAINED FLEET RECOVERY checks a complete delivered fleet, then offers one explicit no-charge confirmation.
+- Recovery uses only exact ship references already retained by FOC, for any supported hull/count. It does not search for similar ships or reconstruct old individual receipt links by position.
+- Incomplete records, unfinished ships, changed ownership/orders, protected ships and stale reviews block recovery. Older attempts without usable prepared-purchase records cannot be automatically recovered.
+- Original receipts remain intact. Existing guarded assembly rechecks ships before acting; status, delivery, assembly and runtime acceptance are separate.
+- B070 diagnostic native lookups of old receipt IDs are retired. Runtime acceptance is required.
+
+Historical Build 070 diagnostics (superseded):
+- Manual CHECK records saved MD task type/existence/string/ship and independent native receipt-ID lookups.
+- At most two samples per Lua session; first eight rows/receipts per sample. No probe purchases, bindings or assignments.
+- Failed status reports identify rejected fields/types/counts; acceptance and purchase logic are unchanged.
+- Load the existing saved purchase and use CHECK PREPARED ORDER / DELIVERY once. Do not prepare or confirm another purchase.
+- Send the result screenshot, then exit normally for debug-log review. No automatic purchase retry is added.
+- Native runtime acceptance is required. B068 history follows unchanged.
+
+Build 068 correction:
+- Home and supplier lookup IDs now use validated native transport; textual quote/readback keys remain unchanged.
+- Missing identities stop confirmation before a request is sent. All reservation safeguards remain active.
+- Exact B067 failure and corrected serialized transport are covered by regression tests. Native runtime acceptance is required.
+
+Retained Build 067 diagnostics:
+- Reservation failures identify the first rejected check (R01-R26), with request/Home and supplier context when evaluated.
+- Refusal remains on the error/report page after CHECK. Screenshot the entire page and report it to the developer; do not repeat an uncertain purchase.
+- Bounded RESERVE_PACKET logging records the outgoing values/types.
+- No purchase safeguard is bypassed; payment, capture locks, native orders, delivery and assembly are unchanged. No automatic retry.
+
+Status: TEST candidate. RUNTIME ACCEPTANCE REQUIRED. No installation included.
+
+Build 066 corrections:
+- Resolve native UI shiptrader identities with the source-specific conversion.
+- Retain original purchase errors in warning color with screenshot-report help.
+- Guide NPC purchase paging, preparation and error recovery with next arrows.
+- No retained order is not a zero-cost receipt. CHECK preserves failure evidence.
+- Bounded purchase diagnostics aid reporting; no added background polling.
+
+Retained Build 065 prepared purchasing:
+- Save a fleet and Home, then PREPARE ENTIRE SAVED FLEET PURCHASE.
+- Inspect every hull, NPC supplier, medium equipment, quantity and full price.
+- Only CONFIRM PURCHASE spends credits and authorizes delivery-time assembly.
+- Native orders can wait for materials. Exact task/payment verification precedes
+  FOC adoption; captains, ownership and unchanged orders precede Home patrol.
+- CHECK reads retained orders only. Partial or uncertain purchases are retained
+  and must not be repeated; no automatic purchase replay or speculative refund.
+- Native loadouts/payment, UI, delivery and reload require exact-artifact tests.
+
+Retained Build 063 corrections:
+- Resolve incoming Home and NPC supplier IDs before native object checks.
+- Save refusals explain the failed requirement, retain the draft and unlock
+  correction after the matching refusal. Timeouts still require reconciliation.
+- Recovery return checks safely handle an absent docking-order record without
+  changing repair/reload policy or overwriting newer manual work.
+
+Retained Build 062 corrections:
+- Regular proposals exclude native limited/research-restricted hulls and require
+  known acquisition permissions. No display-name blacklist is used.
+- Saved templates include Home. Older templates ask for Home before ordering.
+- Saving advances to saved plans after complete readback. Reviewing an identical
+  saved draft works; a different unsaved draft stays protected.
+- NPC suppliers remain available even when an owned yard can build that hull.
+- Construction reports the failed blueprint, yard, equipment or Home stage.
+
+Retained Build 061 corrections:
+- Back/navigation redraw waits for dropdown closure and cannot stay locked after deactivation.
+- Buttons acknowledge a click; fleet order and repair refresh show their actual completed results.
+- Repeated clicks on the same rendered button are suppressed until redraw.
+- No installation or publication. Test dropdown selection/cancel, Saved Templates > Back,
+  command results, repair refresh, other tabs and close/reopen in X4.
+
+Retained Build 060 features:
+- Command previews each saved FOC fleet's current order, proposed order and Home.
+  Choose saved fleet orders, Patrol all fleet Home sectors, or Guard all fleet
+  Home points. All Fleets means all saved FOC fleets, not every owned ship.
+  Sending uses a single-use preview, rechecks fleet settings and membership,
+  and leaves locked, busy, protected or recovery-engaged fleets alone.
+- Task Force primary/backup roles and automatic swapping are retired. This does
+  not remove carrier-wing or assault reserve roles, which are separate features.
+- Fleet selection includes current assignment, command target and sector.
+- Coverage, ship comparison, draft and saved plans have separate navigation steps.
+- Map route overlays wait for camera movement to settle before resampling.
+  Fixed red plus marks are removed. Exact hotspot cell-border recoloring is
+  deferred by the player; route lines are not exact sector boundaries.
+
+Create a fleet: Strategic Ops > Coverage and Fleet Templates.
+1. Refresh coverage, select a hotspot, and read the fleet-needed recommendation.
+   It uses retained attack samples and available fleet evidence, not a complete
+   forecast of future traffic or guaranteed protection. Missing evidence is not NO.
+2. Review the proposed combat hulls and quantities. Choose the suggested Home
+   sector or another known sector. Save the composition before requesting ships.
+3. With a compatible player yard and the required blueprints, prepare and confirm
+   construction. Normal native construction resources are required; no free ships.
+4. For NPC purchases, use the draft's purchase action. FOC arms exact task capture
+   before opening X4's purchase menu. Confirm equipment, quantity and payment in
+   that native menu. FOC does not silently spend money to repeat the purchase.
+5. Return to NPC purchase review. Check progress, explicitly select only the
+   purchases intended for this template, then approve that exact set. Matching
+   hull/yard alone does not authorize adoption. The set must match all quantities.
+6. Approved exact deliveries assemble automatically when ships and captains are
+   available and safety checks pass. The first template entry leads the fleet.
+   FOC saves its Home and orders a Home-sector patrol. Patrol ordered does not
+   mean physically arrived. Inspect the fleet on X4's map for actual movement.
+
+Delivery handling runs with FOC closed; CHECK reads retained progress and does
+not buy ships or trigger assembly. Native queues may wait for resources. Inspect
+the yard queue if delayed; do not buy again merely because delivery is pending.
+NPC review lists retained QUEUED, DELIVERED, CANCELLED or DELIVERY UNCONFIRMED
+records. Reported native task price is not a payment receipt. Approval is single
+use; changed, missing or destroyed records block deployment. New manual orders
+are protected. Unapproved tracking may be discarded without cancelling purchases.
+Capture is bounded to one session, 30 minutes and 100 records, with explicit
+expiry/overflow. Templates are limited to 20, with 8 hull entries and 100 ships.
+Reload preserves records and approved delivery jobs, but closes capture. It never
+reopens the purchase menu, repeats purchases or adopts unapproved candidates.
+
+Dock selection now respects ship travel blacklists. Only completed cancellation
+events end the recovery order. Prior-order readback is not proof of resumed trade
+or delivery. The historical shelter cancellation cause and full repair/return
+cycle still require exact-artifact runtime testing. Interrupted repairs retain
+the separately authorized return/recheck policy, including a possible new fee;
+that exception never applies to ship procurement or paid cargo transactions.
+
+The following sections preserve prior-build history, not B060 completion claims.
+
+Build 059: Strategic Ops usability cleanup. Task Force roles now say Primary
+Response Fleet and Backup Fleet, with fleet names. Home defense priority is
+explained and is not a Home location picker. Maintenance remains in Fleets.
+Hotspot selection immediately shows area details before the longer template list.
+Other Strategic Ops workspaces explain what their actions do. Map heading and
+all current menu entry routes now identify Build 059 consistently.
+This UI-only update does not add automatic buying, building or deployment.
+Known runtime issue carried forward: B058 shelter orders were cancelled shortly
+after being requested. This update does not fix that behavior or prove repairs.
+
+Build 058: NEW Hotspots / Fleet Templates, available from the FOC Operations Map
+and Strategic Ops > Coverage and Fleet Templates. Refresh reads retained civilian
+attack samples from the last game hour. Select a hotspot to compare the nearest
+unlocked enrolled fleet on default orders and its gate distance. Readiness and
+dispatch eligibility still need checking. Suggested Home is a sector: choose a
+safe exact point with the existing fleet Home picker, not an assumed safe berth.
+
+Compare combat hulls to rank generated medium presets by speed or sustained
+firepower. An owned hull blueprint plus a compatible owned yard gives a BUILD
+route; otherwise an available NPC yard gives a BUY route. Unknown stats sort last.
+The comparison is one-shot, one hull per visible menu update, paused off-page.
+Build a composition manually or request a four-ship fast-response starter plan.
+Save/load one of 20 numbered slots, up to 8 hull entries and 100 ships per template.
+Save replaces the selected slot only after validation and exact complete readback.
+Templates contain hull quantities, not exact equipment, software or modifications.
+Confirm equipment, affordability, resources and purchase in X4's native menu.
+The advisor never buys, builds, assigns ships, moves fleets or spends credits.
+
+FIXED recovery cooldown storage: bounded MD records replace the invalid component
+variable. Native DockAt children are recognized through their exact DockAndWait
+reverse link before the parent's child link is populated. Release/end diagnostics
+now include reasons. The prior log did not retain its early-exit reason; real
+docking/repair/return still needs testing, and no prior success is inferred.
+
+Build 057 adds independent OFF-default Settings switches
+for combat repair/return and attacked-transport docking. NPC repairs may charge
+player credits. No upgrades, ammunition or equipment replacements are requested.
+Repair uses compatible fleet suppliers before player stations, then NPC stations.
+Transport shelter is not released merely because a response fleet arrives.
+Capital docks are exposed and do not guarantee invulnerability.
+Interrupted repair jobs reset on reload; a new repair may charge again.
+Jobs are event-driven, capped at 64, with no permanent empire damage scan.
+Provider searches are bounded and use native distance ordering within each tier.
+New manual orders take precedence. STOP disables both recovery options.
+Quotes are rechecked before debit; actual payment and repairs have separate checks.
+Equipment modification values are compared before/after repair without changing them.
+Threat overflow holds conservatively until the player intervenes. Failed searches
+wait for a later combat event after a cooldown; they do not continuously retry.
+Exact game loading, orders, repairs, payment and save/reload need runtime testing.
+No installation or publication is included in this TEST build.
 
 Build 056 replaces diagnostic-only Session History with paged recorded activity.
 Both views use the same save-persistent latest 50 events, including yellow distress
@@ -12,7 +190,7 @@ button to inspect the current subject in X4's live map without sending orders.
 If the subject has disappeared, the button opens its recorded sector, not an
 invented battle position. Legacy records without identity remain readable with
 their map button disabled. Back restores the history view and scroll position.
-Repair automation is deferred. This TEST package is not installed or published.
+Repair automation was deferred in B056; B057 introduces the opt-ins above.
 
 Build 055 restores saved carrier wing settings by exact carrier ID and group.
 The Saved wing row shows persistent readback separately from the editable draft.

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Plan" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="md.xsd">
+ <cues>
+  <cue name="Plan_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions><remove_value name="global.$JKFOC_OrderPreview"/></actions></cue>
+  <cue name="Plan_Check" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$p" exact="event.param"/><set_value name="$p.$reason" exact="'READY'"/><set_value name="$ship" exact="$p.$ship"/>
+   <do_if value="not $ship or not $ship.exists"><set_value name="$p.$reason" exact="'SHIP NO LONGER EXISTS'"/></do_if>
+   <do_elseif value="$ship.owner != faction.player or $ship != $p.$draft.$commander or $ship.idcode != $p.$id"><set_value name="$p.$reason" exact="'FLEET IDENTITY CHANGED'"/></do_elseif>
+   <do_elseif value="$ship == player.controlled or not @$ship.assignedpilot.exists"><set_value name="$p.$reason" exact="'PLAYER CONTROL OR MISSING CAPTAIN'"/></do_elseif>
+   <do_elseif value="$p.$draft.$locked"><set_value name="$p.$reason" exact="'LOCKED IN FLEETS SETTINGS'"/></do_elseif>
+   <do_elseif value="$ship.primarypurpose != purpose.fight and not @$p.$draft.$noncombatoverride"><set_value name="$p.$reason" exact="'NON-COMBAT FLEET NOT AUTHORIZED'"/></do_elseif>
+   <do_elseif value="not $p.$home or not $p.$home.exists"><set_value name="$p.$reason" exact="'CHOOSE A UNIQUE HOME IN FLEETS'"/></do_elseif>
+   <do_elseif value="@$ship.order.exists and (not @$ship.defaultorder.exists or $ship.order != $ship.defaultorder)"><set_value name="$p.$reason" exact="'BUSY WITH AN ACTIVE ORDER - LEFT ALONE'"/></do_elseif>
+   <do_elseif value="@$p.$draft.$manualoverride and @$ship.defaultorder.id and $ship.defaultorder.id != 'Patrol' and $ship.defaultorder.id != 'ProtectPosition'"><set_value name="$p.$reason" exact="'MANUAL BEHAVIOR PROTECTED'"/></do_elseif>
+   <do_elseif value="@$ship.order.exists and @$ship.order.state == orderstate.critical and not $ship.order.canplayercancel"><set_value name="$p.$reason" exact="'CRITICAL ORDER PROTECTED'"/></do_elseif>
+   <do_else>
+    <set_value name="$members" exact="[$ship]"/><do_for_each name="$member" in="$ship.allsubordinates"><append_to_list name="$members" exact="$member"/></do_for_each>
+    <do_if value="$members.count gt global.$JKFOC_OperationsPolicy.$maxfleetsize"><set_value name="$p.$reason" exact="'FLEET EXCEEDS CONFIGURED SIZE LIMIT'"/></do_if>
+    <do_for_each name="$member" in="$members"><do_if value="not $member.exists or $member.owner != faction.player or $member == player.controlled or not @$member.assignedpilot.exists"><set_value name="$p.$reason" exact="'MEMBER OWNERSHIP, CONTROL OR CAPTAIN NEEDS ATTENTION'"/></do_if><do_elseif value="not global.$JKFOC_StoryShipOverrides.indexof.{$member.idcode} and ($member.ismission or global.$JKFOC_ProtectedShipIDs.indexof.{$member.idcode} or $member == @md.Story_Terraforming.Start.$BettyShip)"><set_value name="$p.$reason" exact="'MISSION OR STORY MEMBER PROTECTED'"/></do_elseif><do_elseif value="$member.hullpercentage lt global.$JKFOC_OperationsPolicy.$fleethull"><set_value name="$p.$reason" exact="'DAMAGED FLEET MEMBER - LEFT ALONE'"/></do_elseif></do_for_each>
+    <do_if value="$ship.hullpercentage lt global.$JKFOC_OperationsPolicy.$commanderhull"><set_value name="$p.$reason" exact="'COMMANDER BELOW READINESS THRESHOLD'"/></do_if>
+    <do_for_each name="$lock" in="global.$JKFOC_ResponseLocks"><do_if value="@$lock.$commander == $ship"><set_value name="$p.$reason" exact="'DISTRESS RESPONSE IN PROGRESS'"/></do_if></do_for_each>
+    <do_if value="global.$JKFOC_RecoveryJobs?"><do_for_each name="$job" in="global.$JKFOC_RecoveryJobs"><do_if value="$members.indexof.{@$job.$ship}"><set_value name="$p.$reason" exact="'REPAIR OR SHELTER JOB IN PROGRESS'"/></do_if></do_for_each></do_if>
+   </do_else>
+  </actions></cue>
+  <cue name="Plan_Show" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$plan" exact="event.param"/><raise_lua_event name="'FOC_Plan.request'" param="$plan.$request"/><raise_lua_event name="'FOC_Plan.begin'" param="$plan.$token"/><raise_lua_event name="'FOC_Plan.count'" param="$plan.$rows.count"/><raise_lua_event name="'FOC_Plan.message'" param="$plan.$message"/>
+   <do_for_each name="$row" in="$plan.$rows"><raise_lua_event name="'FOC_Plan.rowbegin'"/><raise_lua_event name="'FOC_Plan.id'" param="$row.$id"/><raise_lua_event name="'FOC_Plan.name'" param="$row.$name"/><raise_lua_event name="'FOC_Plan.wanted'" param="$row.$wanted"/><raise_lua_event name="'FOC_Plan.home'" param="$row.$homename"/><raise_lua_event name="'FOC_Plan.reason'" param="$row.$reason"/><raise_lua_event name="'FOC_Plan.oldorder'" param="$row.$oldlabel"/><raise_lua_event name="'FOC_Plan.rowcommit'"/></do_for_each>
+   <raise_lua_event name="'FOC_Plan.complete'" param="$plan.$token"/>
+  </actions></cue>
+  <cue name="Plan_Request" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Menu'" control="'order_preview'"/></conditions><actions>
+   <do_if value="not global.$JKFOC_OrderPreviewNext?"><set_value name="global.$JKFOC_OrderPreviewNext" exact="0"/></do_if><set_value name="global.$JKFOC_OrderPreviewNext" operation="add" exact="1"/>
+   <set_value name="$plan" exact="table[$token=global.$JKFOC_OrderPreviewNext, $request=event.param3.{2}, $rows=[], $created=player.age, $count=global.$JKFOC_FleetDrafts.count, $message='Review these saved FOC fleets. Each keeps its own Home.']"/>
+   <set_value name="$mode" exact="event.param3.{1}"/><set_value name="$ids" exact="[]"/>
+   <do_if value="$plan.$count gt 100 or not ['SAVED','PATROL','GUARD HOME'].indexof.{$mode}"><set_value name="$plan.$token" exact="0"/><set_value name="$plan.$message" exact="'PREVIEW BLOCKED - INVALID SCOPE OR MORE THAN 100 SAVED FLEETS'"/></do_if>
+   <do_else>
+    <find_sector name="$sectors" multiple="true"/>
+    <do_for_each name="$draft" in="global.$JKFOC_FleetDrafts">
+     <set_value name="$row" exact="table[$draft=$draft, $id=$draft.$commanderidcode, $ship=$draft.$commander, $name=$draft.$fleetname, $role=$draft.$fleetrole, $locked=$draft.$locked, $manual=@$draft.$manualoverride, $override=@$draft.$noncombatoverride, $homename=$draft.$homename, $x=$draft.$homex, $y=$draft.$homey, $z=$draft.$homez, $home=null, $current=null, $default=null, $oldlabel='NONE', $members=[], $reason='PENDING']"/>
+     <set_value name="$row.$wanted" exact="if $mode == 'PATROL' or ($mode == 'SAVED' and ($draft.$fleetrole == 'PATROL' or $draft.$fleetrole == 'PATROL GROUP')) then 'Patrol' else 'ProtectPosition'"/>
+     <set_value name="$matches" exact="0"/><do_for_each name="$sector" in="$sectors"><do_if value="$sector.knownname == $row.$homename"><set_value name="$matches" operation="add" exact="1"/><set_value name="$row.$home" exact="$sector"/></do_if></do_for_each><do_if value="$matches != 1"><set_value name="$row.$home" exact="null"/></do_if>
+     <do_if value="$row.$ship and $row.$ship.exists"><append_to_list name="$row.$members" exact="$row.$ship"/><do_for_each name="$member" in="$row.$ship.allsubordinates"><append_to_list name="$row.$members" exact="$member"/></do_for_each><do_if value="@$row.$ship.order.exists"><set_value name="$row.$current" exact="$row.$ship.order"/><set_value name="$row.$oldlabel" exact="$row.$ship.order.id"/></do_if><do_if value="@$row.$ship.defaultorder.exists"><set_value name="$row.$default" exact="$row.$ship.defaultorder"/></do_if></do_if>
+     <signal_cue_instantly cue="Plan_Check" param="$row"/><set_value name="$row.$eligible" exact="$row.$reason == 'READY'"/>
+     <do_if value="$ids.indexof.{$row.$id}"><set_value name="$plan.$token" exact="0"/><set_value name="$plan.$message" exact="'PREVIEW BLOCKED - DUPLICATE FLEET IDENTITY'"/></do_if><append_to_list name="$ids" exact="$row.$id"/><append_to_list name="$plan.$rows" exact="$row"/>
+    </do_for_each>
+   </do_else>
+   <set_value name="global.$JKFOC_OrderPreview" exact="$plan"/><signal_cue_instantly cue="Plan_Show" param="$plan"/>
+  </actions></cue>
+  <cue name="Plan_Apply" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Menu'" control="'order_apply'"/></conditions><actions>
+   <do_if value="global.$JKFOC_OrderPreview? and global.$JKFOC_OrderPreview.$token gt 0 and global.$JKFOC_OrderPreview.$token == event.param3.{1}">
+    <set_value name="$plan" exact="global.$JKFOC_OrderPreview"/><set_value name="$plan.$request" exact="event.param3.{2}"/><remove_value name="global.$JKFOC_OrderPreview"/>
+    <set_value name="$valid" exact="player.age - $plan.$created le 120s and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{global.$JKFOC_Authority} and global.$JKFOC_FleetDrafts.count == $plan.$count"/>
+    <do_for_each name="$row" in="$plan.$rows"><do_if value="$row.$eligible">
+     <signal_cue_instantly cue="Plan_Check" param="$row"/>
+     <do_if value="$row.$reason != 'READY'"><set_value name="$valid" exact="false"/></do_if>
+     <do_else><set_value name="$same" exact="global.$JKFOC_FleetDrafts.indexof.{$row.$draft} and $row.$draft.$fleetrole == $row.$role and $row.$draft.$locked == $row.$locked and @$row.$draft.$manualoverride == $row.$manual and @$row.$draft.$noncombatoverride == $row.$override and $row.$draft.$homename == $row.$homename and $row.$draft.$homex == $row.$x and $row.$draft.$homey == $row.$y and $row.$draft.$homez == $row.$z and (if @$row.$ship.order.exists then $row.$ship.order == $row.$current else not $row.$current) and (if @$row.$ship.defaultorder.exists then $row.$ship.defaultorder == $row.$default else not $row.$default)"/><do_if value="$row.$ship.allsubordinates.count + 1 != $row.$members.count"><set_value name="$same" exact="false"/></do_if><do_for_each name="$member" in="$row.$members"><do_if value="$member != $row.$ship and not $row.$ship.allsubordinates.indexof.{$member}"><set_value name="$same" exact="false"/></do_if></do_for_each><do_if value="not $same"><set_value name="$valid" exact="false"/><set_value name="$row.$reason" exact="'SETTINGS OR ORDERS CHANGED - PREVIEW AGAIN'"/></do_if></do_else>
+    </do_if></do_for_each>
+    <set_value name="$active" exact="0"/>
+    <do_if value="$valid"><do_for_each name="$row" in="$plan.$rows"><do_if value="$row.$eligible">
+     <remove_value name="$sent"/>
+     <do_if value="$row.$wanted == 'Patrol'"><create_order name="$sent" id="'Patrol'" object="$row.$ship" default="true"><param name="space" value="$row.$home"/></create_order></do_if>
+     <do_else><create_order name="$sent" id="'ProtectPosition'" object="$row.$ship" default="true"><param name="destination" value="[$row.$home, position.[$row.$x, $row.$y, $row.$z]]"/><param name="radius" value="40km"/></create_order></do_else>
+     <set_value name="$row.$reason" exact="if $sent? and @$row.$ship.defaultorder.exists and $row.$ship.defaultorder == $sent and @$row.$ship.order.exists and $row.$ship.order == $sent then 'ACTIVE' else 'ASSIGNMENT NOT CONFIRMED ACTIVE - CHECK X4'"/>
+     <do_if value="$row.$reason == 'ACTIVE'"><set_value name="$active" operation="add" exact="1"/></do_if>
+     <signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['FLEET_ORDER', $row.$reason, $row.$name, '%1 AT %2 | FLEET %3'.[$row.$wanted, $row.$homename, $row.$id]]"/>
+    </do_if></do_for_each><set_value name="$plan.$message" exact="'%1 FLEET ORDERS CONFIRMED ACTIVE. See each fleet result below. Preview again before another order.'.[$active]"/></do_if>
+    <do_else><set_value name="$plan.$message" exact="'NOTHING SENT - PREVIEW EXPIRED, MODE CHANGED OR FLEET STATE CHANGED. PREVIEW AGAIN.'"/><do_for_each name="$row" in="$plan.$rows"><do_if value="$row.$reason == 'READY'"><set_value name="$row.$reason" exact="'NOT SENT - PREVIEW AGAIN'"/></do_if></do_for_each></do_else>
+    <set_value name="$plan.$token" exact="0"/><signal_cue_instantly cue="Plan_Show" param="$plan"/>
+   </do_if>
+   <do_else><raise_lua_event name="'FOC_Plan.rejected'" param="'NOTHING SENT - NO MATCHING UNUSED PREVIEW. PREVIEW AGAIN.'"/></do_else>
+  </actions></cue>
+ </cues>
+</mdscript>

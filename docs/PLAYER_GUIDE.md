@@ -1,8 +1,8 @@
-# Fleet Operations Command v1.55 - Complete Player Guide
+# Fleet Operations Command v1.71 - Complete Player Guide
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 
-**Applies to:** Fleet Operations Command v1.54, Build 056
+**Applies to:** Fleet Operations Command v1.71, Build 072
 
 **Game:** X4: Foundations
 
@@ -10,7 +10,9 @@
 
 FOC is designed to be safe. It explains what it found, what it plans to do, and why an action was allowed or blocked. You stay in command.
 
-Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. The text in this guide is current for Build 056, including the dedicated FOC Historical Intelligence Map introduced in v1.49 and the Strategic Ops additions in v1.54.
+Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. This guide is current for Build 072. The purchasing and recovery walkthrough below uses new B072 screenshots.
+
+**New fleet?** Go to [Coverage and Fleet Templates](#8f-coverage-and-fleet-templates---plan-buy-and-recover). **Already paid for ships?** Use [Recover an existing purchase](#recover-an-existing-purchase-without-buying-again). **Looking for automation settings?** See [Combat repair and transport shelter](#combat-repair-and-transport-shelter).
 
 ---
 
@@ -43,7 +45,7 @@ FOC uses X4's live commander hierarchy instead of trusting fleet names or old ma
 ### Four words you should know
 
 - **UNKNOWN** means FOC could not prove the information. It does not mean everything is fine.
-- **BLOCKED** means a safety check stopped the action. Nothing changed.
+- **BLOCKED** means a safety check stopped the requested step. Read the retained result: earlier submitted orders or completed parts of a transaction may still exist.
 - **PENDING** means FOC sent a request and is waiting for X4 to report back.
 - **ACTIVE / CONFIRMED** means X4 returned the expected order or state.
 
@@ -432,6 +434,92 @@ Map selection and saving a plan are separate from issuing orders. Rally uses nam
 
 ---
 
+## 8F. COVERAGE AND FLEET TEMPLATES - plan, buy, and recover
+
+Open **STRATEGIC OPS**, then choose **COVERAGE AND FLEET TEMPLATES** in **Choose an operation**. This workspace creates a fleet composition and Home, reviews construction or purchase, and tracks the resulting ships. Saving a template does not order ships or spend credits.
+
+### Save a fleet plan
+
+1. Select **REFRESH HOTSPOTS AND TEMPLATES** to review retained attack evidence. Samples are recorded attacks, not unique battles or a complete measure of supply traffic.
+2. Choose an attacked area, or select **PLAN A NEW FLEET** to start without a hotspot.
+3. Choose the intended Home, then build the composition with the hulls and quantities you want.
+4. Select **SAVE FLEET AND HOME - CONTINUE**.
+5. Open the saved fleet's **REVIEW / BUY** entry. Use **NEXT** when controls continue onto another page.
+
+Fleet-composition templates here are separate from the reusable order/settings presets described in Settings.
+
+### Buy the saved fleet from NPC suppliers
+
+1. Review the Home, hull quantities, and supplier listed for each entry.
+2. Select **PREPARE ENTIRE SAVED FLEET PURCHASE**. This prepares a quote; it does not buy anything.
+3. Inspect every hull and its equipment using the detail selectors. Check the quantity, supplier, per-ship equipped price, and whole-fleet total.
+4. The offered loadout uses the listed medium equipment and includes a native captain, but no extra service crew, marines, or custom paint. Inspect the actual list rather than assuming it matches a custom saved outfitting preset.
+5. If the whole quote is correct, select **CONFIRM PURCHASE: … SHIPS FOR … Cr** once. An expired or changed quote must be prepared again before purchase.
+6. Read the result. Use **CHECK PREPARED ORDER / DELIVERY** for retained transaction evidence, or **VIEW VERIFIED PURCHASES / FLEET DELIVERY** when offered.
+
+Normal X4 construction and material availability still apply. Submitted orders can continue with FOC closed. Delivery and fleet assembly are separate stages; a ship in construction is not yet a delivered fleet member.
+
+**Do not buy again because delivery is pending or purchase readback is incomplete.** An uncertain result does not prove that no credits were taken or no ships were ordered. Check the native X4 balance, construction list, and exact ship identities before deciding what happened. Checking status does not place another purchase.
+
+### Build at your own yards instead
+
+The saved fleet's review page also offers **PREVIEW BUILDING THIS FLEET AT MY YARDS**. This is a separate player-yard route, not the NPC purchase button. Review its eligible hulls, blueprints, equipment, resources, and blockers before using its confirmation. Preview alone neither queues ships nor bypasses normal X4 construction requirements.
+
+### Recover an existing purchase without buying again
+
+Use this route when the ships were already purchased and retained, but the fleet still needs to be assembled after incomplete readback or a reload.
+
+1. Open **STRATEGIC OPS -> COVERAGE AND FLEET TEMPLATES -> OPEN SAVED FLEET TEMPLATES**.
+2. Select **CHECK PREPARED FLEET ORDER**. Do not prepare a second purchase.
+3. Inspect the retained order count and each retained ship's identity and delivery status.
+4. Select **REVIEW RETAINED FLEET RECOVERY - NO CHARGE**.
+5. If all retained ships pass review, read the proposed recovery and select **CONFIRM RECOVERY: … RETAINED SHIPS - NO CHARGE** once.
+6. After confirmation, use **VIEW VERIFIED PURCHASES / FLEET DELIVERY** to see the assembly result.
+
+![B072 recovery review: four retained ships passed checks and no-charge confirmation is available](images/v171/01-recovery-review.png)
+
+*Recovery review identifies the already purchased ships. NO CHARGE refers to recovering those ships into the fleet, not a refund or a new free purchase.*
+
+Missing historical order information may be reconciled only for reviewed idle **Hold Position** ships with an empty queue. Confirmation authorizes replacing that specific reviewed idle state. FOC checks again before delayed assembly; changed orders or assignments can block it. A player-work blocker is not a reason to erase orders just to force recovery through.
+
+**ASSEMBLY PENDING** means confirmation was accepted, not that the group is already complete. **FLEET ASSEMBLED - HOME PATROL ORDERED** means the ships were grouped and a Home patrol submitted; it does not by itself confirm physical arrival.
+
+![B072 delivery review: four ships assembled and Home patrol ordered for Argon Prime](images/v171/02-fleet-assembled.png)
+
+*This example shows four selected ships out of four needed. The recorded total is order-price information, not a new charge or a replacement payment receipt.*
+
+### What the assembled fleet looks like
+
+In X4's native property list, expand the resulting fleet. The example below has **AMA-454** as commander and **PWK-928**, **QOA-401**, and **XQH-331** in its Defence group. These IDs are examples; use the identities belonging to your purchase. X4 may initially give the group a numbered fleet name.
+
+![Native X4 fleet hierarchy showing one commander and three Dragon Raider escorts](images/v171/03-native-fleet.png)
+
+The commander's Behaviour page shows its three subordinates and **Patrol** with **Argon Prime** as the target Home in this example. A subordinate's assignment can be Defence while its immediate displayed command is Wait; inspect the commander and actual movement before treating that alone as a failure.
+
+![Native commander Behaviour with three subordinates and Patrol targeting Argon Prime](images/v171/04-native-patrol.png)
+
+### Saving and returning to the fleet
+
+Save your game normally after successful assembly. The fleet hierarchy and saved FOC settings can then be retained in that save. On reload, open **FLEETS** and select the fleet to review its restored Home and members.
+
+![B072 after reload: Response Fleet 1 and its four ships shown in Argon Prime](images/v171/05-reloaded-fleet.png)
+
+*Restored settings and group membership are distinct from a fresh patrol check. This screen explicitly says active patrol is not confirmed this session. That message alone is not evidence that the native patrol stopped, and it is not a reason to repeat the purchase or recovery.*
+
+### Reading purchase and recovery results
+
+| Result | What it means |
+| --- | --- |
+| Template saved / prepared for review | Plan or quote only; not a completed purchase. |
+| Submission outcome pending / readback uncertain | The outcome is incomplete. Preserve the existing transaction and inspect native orders; do not buy again. |
+| Delivered | The retained ship exists after construction; it may not yet be assigned. |
+| Recovery review passed | Current retained ships passed the review; explicit confirmation is still required. |
+| Player-confirmed recovery / assembly pending | Recovery was authorized; delayed assembly has not yet been reported complete. |
+| Fleet assembled / Home patrol ordered | Grouping and patrol submission reported; arrival is separate. |
+| Changed orders or assignments | Recovery stopped to preserve newer work. Read the exact blocker rather than retrying a purchase. |
+
+---
+
 ## 9. Repair, replace, or rebuild fleet ships
 
 Open **FLEETS**, then choose **REPAIR / REPLACE / REBUILD**.
@@ -636,6 +724,17 @@ These gates apply at the mutation boundary, not just while the page is drawn. Ti
 
 Emergency Retreat is optional and off until the player enables it. For an enrolled active fleet below the saved retreat hull threshold, FOC may issue X4's native **Flee** order from the exact observed attacker. It still blocks story or mission ships, player-controlled ships, missing pilots, critical non-cancelable orders, and duplicate retreats. Cargo dropping is disabled. The saved return behavior determines what happens after the retreat condition clears.
 
+### Combat repair and transport shelter
+
+Settings includes two independent opt-ins, both off by default:
+
+- **Combat repair and return** authorizes eligible damaged combat ships to enter the repair workflow and return to their retained fleet/work when safe. Facility selection prefers a compatible fleet repair ship, then a player facility, then an NPC facility. NPC repair can spend credits; this is not a free repair or equipment-upgrade feature.
+- **Transport emergency docking** authorizes eligible transports to seek shelter while tracked threats remain. Docking availability and native travel still apply; capital piers are exposed rather than guaranteed protection.
+
+Read the returned status for each job. Requested docking, repair, return, and completed recovery are different stages. Newer player orders or a missing original fleet can prevent restoration. **STOP FOC AUTOMATION** disables both opt-ins.
+
+After reload, an interrupted repair may return to its original fleet/work and begin a fresh paid repair if still damaged. That can incur another repair charge. This repair-specific behavior does **not** authorize repeating ship purchases: use the retained-purchase recovery route in section 8F for those.
+
 ### Templates and presets
 
 You may save up to eight reusable fleet templates. The six plain-language presets and saved templates populate visible draft settings only. Applying one does not send an order, rotate a Task Force, enable automation, spend credits, or change X4's story. Review the populated fields and use the normal approval button when you actually want a mutation.
@@ -740,6 +839,10 @@ Read the exact ship name and question. Choose **NO - LET FOC CONTROL IT** only w
 - Confirm a compatible player-owned yard can build the saved hull and loadout.
 - Confirm no living ship or duplicate build already represents that loss.
 
+### Purchased ships exist but are not grouped
+
+Use section 8F's **Recover an existing purchase without buying again** route. Review the retained identities and no-charge recovery rather than preparing another quote. If recovery reports changed work, preserve that work and include the exact result in a support report.
+
 ### An action stays pending
 
 Do not click repeatedly. Wait, refresh once, and inspect **ACTIVITY**. If no result appears, preserve a screenshot and the relevant X4 debug log.
@@ -770,6 +873,14 @@ Report issues at [github.com/razoreqx1/FOC/issues](https://github.com/razoreqx1/
 ---
 
 ## 19. Quick command card
+
+### Recover ships already purchased
+
+`STRATEGIC OPS -> COVERAGE AND FLEET TEMPLATES -> OPEN SAVED FLEET TEMPLATES -> CHECK PREPARED FLEET ORDER -> REVIEW RETAINED FLEET RECOVERY - NO CHARGE -> review identities -> CONFIRM RECOVERY once -> VIEW VERIFIED PURCHASES / FLEET DELIVERY`
+
+### Plan and purchase a new fleet
+
+`STRATEGIC OPS -> COVERAGE AND FLEET TEMPLATES -> PLAN A NEW FLEET -> Home and composition -> SAVE FLEET AND HOME -> REVIEW / BUY -> PREPARE ENTIRE SAVED FLEET PURCHASE -> inspect quote -> CONFIRM PURCHASE once`
 
 ### Start one patrol
 
@@ -844,4 +955,4 @@ Select **Refresh** to retrieve current retained events. Repeated refreshes do no
 
 New distress detections record the exact subject and sector. Select an available history map button to open the live native X4 map on that subject. If the subject no longer exists, its recorded sector opens when available. This is current live inspection, not a replay or a guaranteed battle position. Older records without stored identity remain readable, with map navigation disabled. Use native Back to return to the history view.
 
-Opening the map does not send orders, apply profiles, or spend credits. Existing native repair controls are unchanged; fully automatic Repair and Return is not included in this update.
+Opening the map does not send orders, apply profiles, or spend credits. The separate repair and shelter opt-ins are described in section 15.

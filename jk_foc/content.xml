@@ -3,8 +3,8 @@
          name="Fleet Operations Command"
          description="Standalone fleet readiness, strategic operations, native maintenance, and evidence-based sector intelligence for player fleets."
          author="RazorEQX"
-         version="155"
-         date="2026-09-03"
+         version="171"
+         date="2026-09-07"
          save="false">
   <text language="44"
         name="Fleet Operations Command"

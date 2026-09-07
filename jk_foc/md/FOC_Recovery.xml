@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Recovery" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- B057. Active-job events only; no permanent damage scan or polling loop. -->
+  <cues>
+    <cue name="Recovery_Cooldowns" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <do_if value="not global.$JKFOC_RecoveryCooldowns?"><set_value name="global.$JKFOC_RecoveryCooldowns" exact="[]"/></do_if>
+        <do_for_each name="$cooldown" in="global.$JKFOC_RecoveryCooldowns" reverse="true">
+          <do_if value="not $cooldown.$ship.exists or player.age ge $cooldown.$until"><remove_from_list name="global.$JKFOC_RecoveryCooldowns" exact="$cooldown" multiple="false"/></do_if>
+        </do_for_each>
+      </actions>
+    </cue>
+    <cue name="Recovery_Init" instantiate="true" namespace="this">
+      <conditions><event_game_loaded/></conditions>
+      <actions>
+        <do_if value="not global.$JKFOC_CombatRepair?"><set_value name="global.$JKFOC_CombatRepair" exact="false"/></do_if>
+        <do_if value="not global.$JKFOC_TransportShelter?"><set_value name="global.$JKFOC_TransportShelter" exact="false"/></do_if>
+        <do_if value="not global.$JKFOC_RecoveryJobs?"><set_value name="global.$JKFOC_RecoveryJobs" exact="[]"/></do_if>
+        <set_value name="global.$JKFOC_RecoveryGeneration" exact="@global.$JKFOC_RecoveryGeneration + 1"/>
+        <do_if value="not global.$JKFOC_RecoveryNext?"><set_value name="global.$JKFOC_RecoveryNext" exact="1"/></do_if>
+        <raise_lua_event name="'FOC_Recovery.reset'"/>
+        <do_for_each name="$job" in="global.$JKFOC_RecoveryJobs" reverse="true">
+          <set_value name="$job.$generation" exact="global.$JKFOC_RecoveryGeneration"/>
+          <do_if value="$job.$kind == 'REPAIR'">
+            <set_value name="$job.$restart" exact="true"/>
+            <signal_cue_instantly cue="Recovery_Release" param="[$job, 'RELOAD RETURN TO PRIOR DUTY; FRESH REPAIR MAY CHARGE AGAIN']"/>
+          </do_if>
+        </do_for_each>
+        <signal_cue_instantly cue="Recovery_Policy_Readback"/>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Policy_Readback" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <raise_lua_event name="'FOC_Recovery.repair'" param="if @global.$JKFOC_CombatRepair then 1 else 0"/>
+        <raise_lua_event name="'FOC_Recovery.shelter'" param="if @global.$JKFOC_TransportShelter then 1 else 0"/>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Settings" instantiate="true" namespace="this">
+      <conditions><event_ui_triggered screen="'FOC_Recovery'" control="'policy'"/></conditions>
+      <actions>
+        <do_if value="event.param3.count == 3 and [0,1].indexof.{event.param3.{2}} and [0,1].indexof.{event.param3.{3}}">
+          <do_if value="event.param3.{1} == 'repair' and event.param3.{2} == (if @global.$JKFOC_CombatRepair then 1 else 0)"><set_value name="global.$JKFOC_CombatRepair" exact="event.param3.{3} == 1"/></do_if>
+          <do_elseif value="event.param3.{1} == 'shelter' and event.param3.{2} == (if @global.$JKFOC_TransportShelter then 1 else 0)"><set_value name="global.$JKFOC_TransportShelter" exact="event.param3.{3} == 1"/></do_elseif>
+        </do_if>
+        <signal_cue_instantly cue="Recovery_Policy_Readback"/>
+        <do_for_each name="$job" in="global.$JKFOC_RecoveryJobs" reverse="true">
+          <do_if value="($job.$kind == 'REPAIR' and not @global.$JKFOC_CombatRepair) or ($job.$kind == 'SHELTER' and not @global.$JKFOC_TransportShelter)">
+            <set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job, 'POLICY DISABLED']"/>
+          </do_if>
+        </do_for_each>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Menu_Event" instantiate="true" namespace="this">
+      <conditions><event_ui_triggered screen="'FOC_Menu'"/></conditions>
+      <actions>
+        <do_if value="event.param2 == 'recovery_policy' or event.param2 == 'refresh'"><signal_cue_instantly cue="Recovery_Policy_Readback"/></do_if>
+        <do_elseif value="event.param2 == 'plan_action' and event.param3.{1} == 'STOP_AUTOMATION'">
+          <set_value name="global.$JKFOC_CombatRepair" exact="false"/><set_value name="global.$JKFOC_TransportShelter" exact="false"/>
+          <do_for_each name="$job" in="global.$JKFOC_RecoveryJobs" reverse="true"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job, 'PLAYER STOPPED AUTOMATION']"/></do_for_each>
+          <signal_cue_instantly cue="Recovery_Policy_Readback"/>
+        </do_elseif>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Attack" instantiate="true" namespace="this">
+      <conditions><event_player_owned_attacked/></conditions>
+      <actions>
+        <do_if value="(@global.$JKFOC_CombatRepair or @global.$JKFOC_TransportShelter) and event.object.exists and event.object != player.controlled and event.object.isclass.ship and event.object.owner == faction.player and event.param? and event.param.exists and not event.param.isplayerowned">
+          <set_value name="$ship" exact="event.object"/>
+          <signal_cue_instantly cue="Recovery_Cooldowns"/>
+          <set_value name="$cooling" exact="global.$JKFOC_RecoveryCooldowns.count ge 256 or player.age lt @global.$JKFOC_RecoveryCooldownOverflow"/>
+          <do_for_each name="$cooldown" in="global.$JKFOC_RecoveryCooldowns"><do_if value="$cooldown.$ship == $ship"><set_value name="$cooling" exact="true"/></do_if></do_for_each>
+          <remove_value name="$existing"/>
+          <do_for_each name="$row" in="global.$JKFOC_RecoveryJobs"><do_if value="$row.$ship == $ship"><set_value name="$existing" exact="$row"/></do_if></do_for_each>
+          <do_if value="$existing?">
+            <do_if value="not $existing.$threats.indexof.{event.param}">
+              <do_if value="$existing.$threats.count lt 32"><add_to_group groupname="$existing.$threats" object="event.param"/></do_if>
+              <do_elseif value="not $existing.$uncertain"><set_value name="$existing.$uncertain" exact="true"/><signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['RECOVERY','THREAT OVERFLOW',$ship.knownname,'MORE THAN 32 ATTACKERS; SHELTER WILL NOT CLEAR AUTOMATICALLY. DISABLE SHELTER OR ISSUE A MANUAL ORDER TO RELEASE.','YELLOW_DISTRESS',$ship]"/></do_elseif>
+            </do_if>
+            <do_if value="$existing.$kind == 'REPAIR' and @global.$JKFOC_TransportShelter and ($ship.primarypurpose == purpose.trade or $ship.primarypurpose == purpose.mine)">
+              <do_if value="$existing.$state == 'QUEUED'"><set_value name="$existing.$kind" exact="'SHELTER'"/></do_if>
+              <do_elseif value="@$existing.$provider.isclass.station and @$ship.dock.container == $existing.$provider and @$existing.$order.exists and $existing.$state != 'RETURNING'">
+                <set_value name="$existing.$kind" exact="'SHELTER'"/><set_value name="$existing.$state" exact="'SHELTERED'"/>
+              </do_elseif>
+              <do_else><set_value name="$existing.$nextshelter" exact="true"/><do_if value="$existing.$state != 'RETURNING'"><signal_cue_instantly cue="Recovery_Release" param="[$existing,'NEW TRANSPORT THREAT; SHELTER TAKES PRIORITY']"/></do_if></do_else>
+            </do_if>
+          </do_if>
+          <do_elseif value="$ship.isoperational and $ship.assignedpilot? and $ship != player.controlled and not $ship.ismission and not @global.$JKFOC_ProtectedShipIDs.indexof.{$ship.idcode} and not $ship.isunit and not $cooling">
+            <set_value name="$shelter" exact="@global.$JKFOC_TransportShelter and ($ship.primarypurpose == purpose.trade or $ship.primarypurpose == purpose.mine)"/>
+            <do_if value="$shelter or (@global.$JKFOC_CombatRepair and ($ship.hullpercentage lt 100 or (event.param3? and event.param3.exists and event.param3.hullpercentage lt 100)))">
+              <do_if value="global.$JKFOC_RecoveryJobs.count lt 64"><signal_cue_instantly cue="Recovery_Job" param="[$ship, event.param, if $shelter then 'SHELTER' else 'REPAIR']"/></do_if>
+              <do_elseif value="player.age ge @global.$JKFOC_RecoveryCapacityNotice + 30s">
+                <set_value name="global.$JKFOC_RecoveryCapacityNotice" exact="player.age"/>
+                <signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['RECOVERY','CAPACITY DEFERRED',$ship.knownname,'64 ACTIVE JOB LIMIT; SHIP NOT DIVERTED. NEXT COMBAT EVENT MAY RETRY.','YELLOW_DISTRESS',$ship]"/>
+              </do_elseif>
+            </do_if>
+          </do_elseif>
+        </do_if>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Player_Control" instantiate="true" namespace="this">
+      <conditions><check_any><event_player_started_control/><event_player_stopped_control/></check_any></conditions>
+      <actions>
+        <do_for_each name="$job" in="@global.$JKFOC_RecoveryJobs" reverse="true">
+          <do_if value="$job.$ship == event.param">
+            <set_value name="$job.$restart" exact="false"/><set_value name="$job.$nextshelter" exact="false"/>
+            <do_if value="event.name == 'event_player_stopped_control'"><signal_cue_instantly cue="Recovery_Player_Release" param="$job"/></do_if>
+            <do_else><signal_cue_instantly cue="Recovery_Release" param="[$job,'PLAYER CONTROL OVERRIDE; ONLY OWN DIVERSION IS REMOVED AFTER CONTROL ENDS']"/></do_else>
+          </do_if>
+        </do_for_each>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Player_Release" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions><delay exact="1s"/>
+      <actions><do_if value="global.$JKFOC_RecoveryJobs.indexof.{event.param}"><signal_cue_instantly cue="Recovery_Release" param="[event.param,'PLAYER CONTROL ENDED; REMOVE ONLY OWN DIVERSION']"/></do_if></actions>
+    </cue>
+
+    <cue name="Recovery_Job" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="table[$schema=1,$ship=event.param.{1},$kind=event.param.{3},$generation=global.$JKFOC_RecoveryGeneration,$token=global.$JKFOC_RecoveryNext,$state='QUEUED',$cue=this,$restart=false,$uncertain=false]"/>
+        <create_group groupname="$job.$threats"/>
+        <do_if value="event.param.{2}? and event.param.{2}.exists"><add_to_group groupname="$job.$threats" object="event.param.{2}"/></do_if>
+        <do_if value="event.param.count ge 4"><do_for_each name="$threat" in="event.param.{4}"><do_if value="$threat.exists and not $job.$threats.indexof.{$threat}"><add_to_group groupname="$job.$threats" object="$threat"/></do_if></do_for_each></do_if>
+        <do_if value="event.param.count ge 5"><set_value name="$job.$uncertain" exact="event.param.{5}"/></do_if>
+        <set_value name="global.$JKFOC_RecoveryNext" operation="add" exact="1"/>
+        <set_value name="$job.$startdelay" exact="2s + global.$JKFOC_RecoveryJobs.count * 250ms"/>
+        <append_to_list name="global.$JKFOC_RecoveryJobs" exact="$job"/>
+      </actions>
+      <cues>
+        <cue name="Recovery_Job_Start"><delay exact="$job.$startdelay"/><actions><signal_cue_instantly cue="Recovery_Route" param="$job"/></actions></cue>
+        <cue name="Recovery_Job_Docked" instantiate="true">
+          <conditions><event_object_docked object="$job.$ship"/></conditions>
+          <actions><signal_cue_instantly cue="Recovery_Docked" param="$job"/></actions>
+        </cue>
+        <cue name="Recovery_Job_Repaired" instantiate="true">
+          <conditions><event_object_signalled object="$job.$ship" param="'repairs_done'"/></conditions>
+          <actions><do_if value="$job.$state == 'REPAIR_REQUESTED'"><set_value name="$job.$state" exact="'VERIFYING'"/><signal_cue_instantly cue="Recovery_Evidence_Request" param="[$job,'VERIFY']"/></do_if></actions>
+        </cue>
+        <cue name="Recovery_Job_Threat_Destroyed" instantiate="true">
+          <conditions><event_object_destroyed group="$job.$threats"/></conditions>
+          <actions>
+            <remove_from_group group="$job.$threats" object="event.object"/>
+            <do_if value="$job.$kind == 'SHELTER' and $job.$threats.count == 0 and not $job.$uncertain">
+              <set_value name="$job.$restart" exact="@global.$JKFOC_CombatRepair"/>
+              <signal_cue_instantly cue="Recovery_Release" param="[$job,'TRACKED THREATS DESTROYED; RETURN REQUESTED']"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="Recovery_Job_Owner" instantiate="true">
+          <conditions><event_object_changed_owner object="$job.$ship"/></conditions>
+          <actions><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Forget" param="[$job,'OWNERSHIP CHANGED; NO FURTHER MUTATION']"/></actions>
+        </cue>
+        <cue name="Recovery_Job_Lost">
+          <conditions><event_object_destroyed object="$job.$ship"/></conditions>
+          <actions><signal_cue_instantly cue="Recovery_Forget" param="[$job,'SHIP DESTROYED']"/></actions>
+        </cue>
+        <cue name="Recovery_Job_Order_Ready" instantiate="true">
+          <conditions><event_object_order_ready object="$job.$ship"/></conditions>
+          <actions>
+            <do_if value="@$job.$order.$dockorder.exists"><set_value name="$job.$dockorder" exact="$job.$order.$dockorder"/></do_if>
+            <!-- Native immediate DockAt can announce readiness before its parent edits dockorder. -->
+            <do_if value="event.param.exists and event.param.id == 'DockAt' and @$job.$order.exists and @event.param.$dockandwaitid == $job.$order and @event.param.$destination == $job.$provider"><set_value name="$job.$dockorder" exact="event.param"/></do_if>
+            <do_if value="$job.$state == 'RETURNING' and (event.param == @$job.$originorder or event.param == @$job.$origindefault)"><signal_cue_instantly cue="Recovery_Return_Check" param="$job"/></do_if>
+            <do_elseif value="$job.$state != 'QUEUED' and $job.$state != 'ROUTING' and event.param != @$job.$order and event.param != @$job.$dockorder and event.param != @$job.$order.$dockorder and event.param != @$job.$originorder and event.param != @$job.$origindefault">
+              <set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'NEW ORDER TAKES PRECEDENCE']"/>
+            </do_elseif>
+          </actions>
+        </cue>
+        <cue name="Recovery_Job_Order_Cancelled" instantiate="true">
+          <!-- A critical-order cancellation request is not a completed cancellation. -->
+          <conditions><event_object_order_cancelled object="$job.$ship" immediate="true"/></conditions>
+          <actions>
+            <do_if value="event.param == @$job.$order and $job.$state != 'RETURNING'">
+              <set_value name="$job.$restart" exact="false"/>
+              <signal_cue_instantly cue="Recovery_Release" param="[$job,'RECOVERY ORDER CANCELLED; CLEANING UP ONLY ITS OWN DIVERSION']"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="Recovery_Job_Order_Finished" instantiate="true">
+          <conditions><event_object_order_finished object="$job.$ship"/></conditions>
+          <actions>
+            <do_if value="event.param == @$job.$dockorder or event.param == @$job.$order.$dockorder"><signal_cue_instantly cue="Recovery_Docked" param="$job"/></do_if>
+            <do_elseif value="event.param == @$job.$order and $job.$state != 'RETURNING'"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'RECOVERY ORDER ENDED WITHOUT CONFIRMED OUTCOME']"/></do_elseif>
+          </actions>
+        </cue>
+        <cue name="Recovery_Job_Deadline">
+          <delay exact="30min"/>
+          <actions><do_if value="($job.$kind == 'REPAIR' and $job.$state != 'RETURNING') or $job.$state == 'DOCK_REQUESTED'"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'RECOVERY DEADLINE; OUTCOME NOT CONFIRMED; NO AUTOMATIC REFUND']"/></do_if></actions>
+        </cue>
+      </cues>
+    </cue>
+
+    <cue name="Recovery_Route" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param"/><set_value name="$ship" exact="$job.$ship"/>
+        <set_value name="$safe" exact="$job.$state == 'QUEUED' and $ship.exists and $ship.isoperational and $ship.owner == faction.player and $ship != player.controlled and $ship.assignedpilot? and not $ship.ismission and not @global.$JKFOC_ProtectedShipIDs.indexof.{$ship.idcode} and not $ship.build and @$ship.order.exists and $ship.order.state != orderstate.critical"/>
+        <do_for_each name="$lock" in="global.$JKFOC_ResponseLocks"><do_if value="@$lock.$commander == $ship"><set_value name="$safe" exact="false"/></do_if></do_for_each>
+        <do_if value="$job.$kind == 'SHELTER' and $job.$threats.count == 0 and not $job.$uncertain">
+          <signal_cue_instantly cue="Recovery_Forget" param="[$job,'TRACKED THREATS ALREADY DESTROYED; NO SHELTER DIVERSION NEEDED']"/>
+        </do_if>
+        <do_elseif value="not $safe or ($job.$kind == 'REPAIR' and not @global.$JKFOC_CombatRepair) or ($job.$kind == 'SHELTER' and not @global.$JKFOC_TransportShelter)">
+          <signal_cue_instantly cue="Recovery_Forget" param="[$job,'GUARD BLOCKED; NO ORDERS OR MONEY CHANGED']"/>
+        </do_elseif>
+        <do_else>
+          <set_value name="$job.$state" exact="'ROUTING'"/>
+          <set_value name="$job.$originorder" exact="$ship.order"/><set_value name="$job.$origindefault" exact="$ship.defaultorder"/>
+          <set_value name="$job.$commander" exact="$ship.commander"/>
+          <set_value name="$job.$group" exact="if $ship.commander then $ship.subordinategroupid else 0"/>
+          <set_value name="$suppliers" exact="[]"/><set_value name="$owned" exact="[]"/><set_value name="$npc" exact="[]"/>
+          <do_if value="$job.$kind == 'SHELTER'">
+            <find_station name="$owned" space="player.galaxy" functional="true" multiple="true" knownto="faction.player"><match_relation_to object="$ship" relation="neutral" comparison="ge"/></find_station>
+          </do_if>
+          <do_else>
+            <set_value name="$fleet" exact="if $ship.commander then $ship.toplevelcommander else $ship"/>
+            <do_if value="$fleet.allsubordinates.count le 2048">
+              <do_for_each name="$provider" in="$fleet.allsubordinates"><do_if value="$provider != $ship and $provider.isoperational and $provider.owner == faction.player and $provider.cansupplyclass.{$ship.class}"><append_to_list name="$suppliers" exact="$provider"/></do_if></do_for_each>
+              <do_if value="$fleet != $ship and $fleet.isoperational and $fleet.owner == faction.player and $fleet.cansupplyclass.{$ship.class}"><append_to_list name="$suppliers" exact="$fleet"/></do_if>
+            </do_if>
+            <find_station_by_true_owner name="$owned" space="player.galaxy" faction="faction.player" canequipclass="$ship.class" canbuildclass="null" hascontrolentity="controlpost.shiptrader" multiple="true"/>
+            <find_station name="$npc" space="player.galaxy" canequipclass="$ship.class" canbuildclass="null" hascontrolentity="controlpost.shiptrader" canbuildfor="faction.player" knownto="faction.player" multiple="true"><match_relation_to object="$ship" relation="neutral" comparison="ge"/></find_station>
+          </do_else>
+          <set_value name="$bounded" exact="$suppliers.count + $owned.count + $npc.count le 2048 and ($job.$kind == 'SHELTER' or $fleet.allsubordinates.count le 2048)"/>
+          <remove_value name="$destination"/><set_value name="$dockchecks" exact="0"/>
+          <!-- Match native internal docking movement; never bypass travel blacklists. -->
+          <set_value name="$blacklistgroup" exact="if $ship.primarypurpose == purpose.fight or $ship.primarypurpose == purpose.auxiliary then blacklistgroup.military else blacklistgroup.civilian"/>
+          <do_if value="$bounded">
+            <do_for_each name="$tier" in="[$suppliers,$owned,$npc]">
+              <sort_list list="$tier" sortbydistanceto="$ship"/>
+              <do_for_each name="$provider" in="$tier">
+                <do_if value="not $destination? and $dockchecks lt 16 and $provider.exists and $provider.isoperational and $ship.gatedistance.{$provider}.{$blacklistgroup}.{$ship} ge 0 and ($job.$kind == 'SHELTER' or $provider.canbuildclass.{$ship.class} or $provider.cansupplyclass.{$ship.class})">
+                  <set_value name="$dockchecks" operation="add" exact="1"/>
+                  <request_docking ship="$ship" container="$provider" requirebuilding="$job.$kind == 'REPAIR'" queuedresult="$queued" grantedresult="$granted"/>
+                  <do_if value="$queued or $granted"><set_value name="$destination" exact="$provider"/></do_if>
+                  <do_else><remove_docking_request ship="$ship" container="$provider" immediate="true"/></do_else>
+                </do_if>
+              </do_for_each>
+            </do_for_each>
+          </do_if>
+          <do_if value="$destination? and $ship.order == $job.$originorder and $ship.owner == faction.player and $ship != player.controlled">
+            <set_value name="$job.$provider" exact="$destination"/>
+            <signal_cue_instantly cue="Recovery_Provider_Guard" param="$job"/>
+            <create_order name="$job.$order" object="$ship" id="'DockAndWait'" immediate="true">
+              <param name="destination" value="$destination"/><param name="building" value="$job.$kind == 'REPAIR'"/>
+              <param name="timeout" value="0s"/><param name="releasesignal" value="['FOC_RECOVERY_RELEASE',$job.$token]"/>
+              <param name="noattackresponse" value="true"/><param name="internalorder" value="true"/><param name="dockfollowers" value="false"/>
+            </create_order>
+            <do_if value="@$job.$order.exists"><set_value name="$job.$state" exact="'DOCK_REQUESTED'"/><signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['RECOVERY',$job.$kind + ' DOCK REQUESTED',$ship.knownname,'Destination: %1; native order accepted, arrival not confirmed.'.[$destination.knownname],'YELLOW_DISTRESS',$ship]"/><signal_cue_instantly cue="Recovery_Docked" param="$job"/></do_if>
+            <do_else><remove_docking_request ship="$ship" container="$destination" immediate="true"/><signal_cue_instantly cue="Recovery_Forget" param="[$job,'DOCK ORDER NOT ACCEPTED']"/></do_else>
+          </do_if>
+          <do_else><do_if value="$destination?"><remove_docking_request ship="$ship" container="$destination" immediate="true"/></do_if><signal_cue_instantly cue="Recovery_Forget" param="[$job,'NO PROVEN COMPATIBLE DESTINATION OR SEARCH LIMIT REACHED']"/></do_else>
+        </do_else>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Docked" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param"/>
+        <do_if value="$job.$state == 'DOCK_REQUESTED' and $job.$ship.exists and $job.$provider.exists and (@$job.$ship.dock.container == $job.$provider or @$job.$ship.parkedat == $job.$provider or @$job.$ship.parkedat.hascontext.{$job.$provider})">
+          <do_if value="$job.$kind == 'SHELTER'"><set_value name="$job.$state" exact="'SHELTERED'"/><signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['RECOVERY','SHELTERED',$job.$ship.knownname,'Holding for tracked threats; reaction-force arrival alone will not release this ship.','YELLOW_DISTRESS',$job.$ship]"/></do_if>
+          <do_else><set_value name="$job.$state" exact="'QUOTING'"/><signal_cue_instantly cue="Recovery_Evidence_Request" param="[$job,'QUOTE']"/></do_else>
+        </do_if>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Provider_Guard" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions><set_value name="$job" exact="event.param"/><set_value name="$job.$providercue" exact="this"/></actions>
+      <cues>
+        <cue name="Recovery_Provider_Lost">
+          <conditions><event_object_destroyed object="$job.$provider"/></conditions>
+          <actions><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'REPAIR OR SHELTER DESTINATION DESTROYED; NO SUCCESS CLAIMED']"/></actions>
+        </cue>
+        <cue name="Recovery_Provider_Owner">
+          <conditions><event_object_changed_owner object="$job.$provider"/></conditions>
+          <actions><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'DESTINATION OWNERSHIP CHANGED; QUOTE INVALIDATED']"/></actions>
+        </cue>
+        <cue name="Recovery_Provider_Relation" instantiate="true">
+          <conditions><check_any><event_faction_relation_changed faction="faction.player" otherfaction="$job.$provider.owner"/><event_faction_relation_changed faction="$job.$provider.owner" otherfaction="faction.player"/></check_any></conditions>
+          <actions><do_if value="$job.$provider.exists and $job.$ship.exists and $job.$provider.relationto.{$job.$ship} lt 0"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'DESTINATION NO LONGER NONHOSTILE']"/></do_if></actions>
+        </cue>
+      </cues>
+    </cue>
+
+    <cue name="Recovery_Evidence_Request" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param.{1}"/>
+        <raise_lua_event name="'FOC_Recovery.begin'"/>
+        <raise_lua_event name="'FOC_Recovery.generation'" param="$job.$generation"/>
+        <raise_lua_event name="'FOC_Recovery.token'" param="$job.$token"/>
+        <raise_lua_event name="'FOC_Recovery.ship'" param="$job.$ship"/>
+        <raise_lua_event name="'FOC_Recovery.provider'" param="$job.$provider"/>
+        <raise_lua_event name="'FOC_Recovery.operation'" param="event.param.{2}"/>
+        <raise_lua_event name="'FOC_Recovery.commit'"/>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Evidence" instantiate="true" namespace="this">
+      <conditions><event_ui_triggered screen="'FOC_Recovery'"/></conditions>
+      <actions>
+        <do_if value="event.param2 == 'evidence' or event.param2 == 'failure'">
+          <remove_value name="$job"/>
+          <do_for_each name="$row" in="global.$JKFOC_RecoveryJobs"><do_if value="$row.$generation == event.param3.{1} and $row.$token == event.param3.{2}"><set_value name="$job" exact="$row"/></do_if></do_for_each>
+          <do_if value="$job?">
+            <do_if value="event.param2 == 'failure' and ['QUOTING','COMMITTING','VERIFYING','RECHECK'].indexof.{$job.$state}"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'EVIDENCE BLOCKED: %1'.[event.param3.{3}]]"/></do_if>
+            <do_elseif value="event.param3.count == 7 and $job.$state == 'RECHECK' and $job.$ship == event.param3.{3} and ['DAMAGED','HEALTHY'].indexof.{event.param3.{7}}">
+              <set_value name="$ship" exact="$job.$ship"/>
+              <set_value name="$restart" exact="event.param3.{7} == 'DAMAGED' and @global.$JKFOC_CombatRepair and $ship.exists and $ship.owner == faction.player and $ship != player.controlled and ($ship.order == @$job.$originorder or $ship.order == @$job.$origindefault)"/>
+              <signal_cue_instantly cue="Recovery_Forget" param="[$job,'PRIOR DUTY RESUMED; DAMAGE RECHECK %1'.[event.param3.{7}]]"/>
+              <do_if value="$restart"><signal_cue_instantly cue="Recovery_Job" param="[$ship,null,'REPAIR']"/></do_if>
+            </do_elseif>
+            <do_elseif value="event.param3.count == 7 and $job.$ship == event.param3.{3} and $job.$provider == event.param3.{4} and $job.$ship.exists and $job.$ship.isoperational and $job.$ship.owner == faction.player and $job.$ship != player.controlled and $job.$provider.exists and $job.$provider.isoperational and $job.$provider.relationto.{$job.$ship} ge 0 and (@$job.$ship.dock.container == $job.$provider or @$job.$ship.parkedat == $job.$provider or @$job.$ship.parkedat.hascontext.{$job.$provider}) and @$job.$order.exists and ($job.$ship.order == $job.$order or $job.$ship.order == @$job.$order.$dockorder) and (if $job.$commander then $job.$commander.exists and $job.$ship.commander == $job.$commander and $job.$ship.subordinategroupid == $job.$group else not $job.$ship.commander)">
+              <do_if value="$job.$state == 'QUOTING' and event.param3.{7} == 'QUOTED' and @global.$JKFOC_CombatRepair and event.param3.{5} ge 0">
+                <set_value name="$job.$state" exact="'COMMITTING'"/>
+                <signal_cue_instantly cue="Recovery_Evidence_Request" param="[$job,'COMMIT']"/>
+              </do_if>
+              <do_elseif value="$job.$state == 'COMMITTING' and event.param3.{7} == 'COMMITTED' and @global.$JKFOC_CombatRepair and event.param3.{5} ge 0">
+                <set_value name="$job.$state" exact="'DEBIT_REQUESTED'"/>
+                <set_value name="$job.$amount" exact="if $job.$provider.owner == faction.player then 0Cr else event.param3.{5} * 1Cr"/>
+                <set_value name="$job.$paid" exact="0Cr"/>
+                <do_if value="$job.$amount gt 0Cr and player.money ge $job.$amount"><transfer_money from="faction.player" to="$job.$provider" amount="$job.$amount" result="$job.$paid"/></do_if>
+                <do_if value="$job.$paid == $job.$amount">
+                  <set_value name="$job.$state" exact="'REPAIR_REQUESTED'"/>
+                  <signal_objects object="$job.$provider" param="'repairs_initiate'" param2="$job.$ship" param3="[100,event.param3.{6}]"/>
+                </do_if>
+                <do_else><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'REPAIR PAYMENT NOT CONFIRMED; NO REPAIR REQUESTED']"/></do_else>
+              </do_elseif>
+              <do_elseif value="$job.$state == 'VERIFYING' and event.param3.{7} == 'VERIFIED'"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'REPAIR AND MODIFICATIONS VERIFIED; RETURN REQUESTED']"/></do_elseif>
+            </do_elseif>
+            <do_elseif value="event.param2 == 'evidence' and ['QUOTING','COMMITTING','VERIFYING','RECHECK'].indexof.{$job.$state}"><set_value name="$job.$restart" exact="false"/><signal_cue_instantly cue="Recovery_Release" param="[$job,'CURRENT SHIP, DOCK, ORDER OR ORIGIN NO LONGER MATCHES; NO FURTHER REPAIR AUTHORIZED']"/></do_elseif>
+          </do_if>
+        </do_if>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Release" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param.{1}"/><set_value name="$ship" exact="$job.$ship"/>
+        <debug_text text="'[FOC][B058][RECOVERY_RELEASE] token=%1 state=%2 reason=%3'.[$job.$token,$job.$state,event.param.{2}]" filter="general"/>
+        <do_if value="$job.$state != 'ENDED'">
+        <do_if value="$ship.exists and $ship == player.controlled">
+          <set_value name="$job.$state" exact="'PLAYER_CONTROL'"/><set_value name="$job.$restart" exact="false"/><set_value name="$job.$nextshelter" exact="false"/>
+        </do_if>
+        <do_else>
+        <do_if value="$job.$state != 'RETURNING'"><signal_cue_instantly cue="Recovery_Return_Deadline" param="$job"/></do_if>
+        <set_value name="$job.$result" exact="event.param.{2}"/><set_value name="$job.$state" exact="'RETURNING'"/>
+        <do_if value="$ship.exists and $ship.owner == faction.player and $ship != player.controlled and (@$job.$order.exists or @$job.$dockorder.exists)">
+          <!-- Native DockAndWait stores its exact generated DockAt in dockorder. -->
+          <do_if value="@$job.$order.$dockorder.exists"><set_value name="$job.$dockorder" exact="$job.$order.$dockorder"/></do_if>
+          <do_if value="@$job.$dockorder.exists"><cancel_order order="$job.$dockorder"/></do_if>
+          <do_if value="@$job.$order.exists"><cancel_order order="$job.$order"/></do_if>
+          <signal_cue_instantly cue="Recovery_Return_Check" param="$job"/>
+        </do_if>
+        <do_elseif value="$ship.exists and ($ship.order == @$job.$originorder or $ship.order == @$job.$origindefault)"><signal_cue_instantly cue="Recovery_Returned" param="$job"/></do_elseif>
+        <do_else><signal_cue_instantly cue="Recovery_Forget" param="[$job,$job.$result]"/></do_else>
+        </do_else>
+        </do_if>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Returned" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param"/><set_value name="$ship" exact="$job.$ship"/>
+        <set_value name="$returnorder" exact="@$job.$order"/><set_value name="$returndockorder" exact="@$job.$dockorder"/>
+        <do_if value="$job.$state == 'RETURNING' and $ship.exists and ($ship.order == @$job.$originorder or $ship.order == @$job.$origindefault) and (not $returnorder or not $ship.orders.indexof.{$returnorder}) and (not $returndockorder or not $ship.orders.indexof.{$returndockorder})">
+          <set_value name="$restart" exact="$job.$restart and @global.$JKFOC_CombatRepair and $ship.owner == faction.player and $ship != player.controlled and (if $job.$commander then $job.$commander.exists and $ship.commander == $job.$commander and $ship.subordinategroupid == $job.$group else not $ship.commander)"/>
+          <do_if value="@$job.$nextshelter and @global.$JKFOC_TransportShelter and $ship.owner == faction.player and $ship != player.controlled">
+            <set_value name="$threats" exact="[]"/><do_for_each name="$threat" in="$job.$threats"><append_to_list name="$threats" exact="$threat"/></do_for_each>
+            <signal_cue_instantly cue="Recovery_Forget" param="[$job,'REPAIR DIVERSION RELEASED FOR TRANSPORT SHELTER']"/>
+            <signal_cue_instantly cue="Recovery_Job" param="[$ship,null,'SHELTER',$threats,$job.$uncertain]"/>
+          </do_if>
+          <do_elseif value="$restart"><set_value name="$job.$state" exact="'RECHECK'"/><signal_cue_instantly cue="Recovery_Evidence_Request" param="[$job,'CHECK']"/></do_elseif>
+          <do_else><signal_cue_instantly cue="Recovery_Forget" param="[$job,'%1; PRIOR ORDER READ BACK; TRAVEL AND TRADE DELIVERY NOT CONFIRMED'.[@$job.$result]]"/></do_else>
+        </do_if>
+      </actions>
+    </cue>
+
+    <cue name="Recovery_Return_Check" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions><delay exact="1s"/>
+      <actions><do_if value="global.$JKFOC_RecoveryJobs.indexof.{event.param}"><signal_cue_instantly cue="Recovery_Returned" param="event.param"/></do_if></actions>
+    </cue>
+
+    <cue name="Recovery_Return_Deadline" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions><delay exact="5min"/>
+      <actions><do_if value="global.$JKFOC_RecoveryJobs.indexof.{event.param} and ['RETURNING','RECHECK'].indexof.{event.param.$state}"><signal_cue_instantly cue="Recovery_Forget" param="[event.param,'RETURN DEADLINE; PRIOR DUTY NOT CONFIRMED. NO NEW ORDER OR REPAIR RETRY ISSUED.']"/></do_if></actions>
+    </cue>
+
+    <cue name="Recovery_Forget" instantiate="true" namespace="this">
+      <conditions><event_cue_signalled/></conditions>
+      <actions>
+        <set_value name="$job" exact="event.param.{1}"/>
+        <do_if value="global.$JKFOC_RecoveryJobs.indexof.{$job}">
+          <set_value name="$job.$state" exact="'ENDED'"/>
+          <signal_cue_instantly cue="Recovery_Cooldowns"/>
+          <do_if value="$job.$ship.exists and $job.$ship.owner == faction.player">
+            <do_for_each name="$cooldown" in="global.$JKFOC_RecoveryCooldowns" reverse="true"><do_if value="$cooldown.$ship == $job.$ship"><remove_from_list name="global.$JKFOC_RecoveryCooldowns" exact="$cooldown" multiple="false"/></do_if></do_for_each>
+            <do_if value="global.$JKFOC_RecoveryCooldowns.count lt 256"><append_to_list name="global.$JKFOC_RecoveryCooldowns" exact="table[$ship=$job.$ship,$until=player.age + 30s]"/></do_if>
+            <do_else><set_value name="global.$JKFOC_RecoveryCooldownOverflow" exact="player.age + 30s"/></do_else>
+          </do_if>
+          <debug_text text="'[FOC][B058][RECOVERY_ENDED] token=%1 reason=%2 cooldown_records=%3'.[$job.$token,event.param.{2},global.$JKFOC_RecoveryCooldowns.count]" filter="general"/>
+          <raise_lua_event name="'FOC_Recovery.forget'" param="'%1:%2'.[$job.$generation,$job.$token]"/>
+          <signal_cue_instantly cue="md.FOC_Interface.FOC_Activity_Record" param="['RECOVERY','JOB ENDED',if $job.$ship.exists then $job.$ship.knownname else 'MISSING SHIP','%1 | Quoted: %2 | Paid: %3 | No automatic refund.'.[event.param.{2},if $job.$amount? then $job.$amount else 'NOT DEBITED',if $job.$paid? then $job.$paid else 'NOT DEBITED'],'NORMAL',$job.$ship]"/>
+          <remove_from_list name="global.$JKFOC_RecoveryJobs" exact="$job" multiple="false"/>
+          <do_if value="$job.$providercue?"><cancel_cue cue="$job.$providercue"/></do_if>
+          <cancel_cue cue="$job.$cue"/>
+        </do_if>
+      </actions>
+    </cue>
+  </cues>
+</mdscript>

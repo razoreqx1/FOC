@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Procurement" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="Purchase_Reserve" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Procurement'" control="'reserve'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Ensure"/>
+    <signal_cue_instantly cue="md.FOC_Advisor.Advisor_Ensure"/>
+    <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="null"/>
+    <!-- Same reservation predicates, ordered for first-failure evidence. No bypass. -->
+    <set_value name="$valid" exact="true"/><set_value name="$reason" exact="''"/>
+    <do_if value="$valid and not (@$p.count ge 9 and @$p.count le 37 and ($p.count - 5) / 4 == (($p.count - 5) / 4)i)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R01 PACKET SHAPE'"/></do_if>
+    <do_if value="$valid and not (not @global.$JKFOC_NPCCapture)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R02 EXISTING PURCHASE CAPTURE'"/></do_if>
+    <do_if value="$valid and not (global.$JKFOC_NPCJobs.count lt 20)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R03 RETAINED JOB LIMIT'"/></do_if>
+    <do_if value="$valid and not (['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority})"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R04 PURCHASE AUTHORITY'"/></do_if>
+    <do_if value="$valid">
+     <set_value name="$home" exact="@component.{$p.{3}}"/><set_value name="$template" exact="null"/>
+     <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates"><do_if value="$t.$id == $p.{2}"><set_value name="$template" exact="$t"/></do_if></do_for_each>
+     <do_if value="$valid and not ($template)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R05 SAVED FLEET NOT FOUND'"/></do_if>
+     <do_if value="$valid and not (@$home.exists)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R06 HOME ID DID NOT RESOLVE'"/></do_if>
+     <do_if value="$valid and not ($home.isclass.sector)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R07 HOME IS NOT A SECTOR'"/></do_if>
+     <do_if value="$valid and not (@$template.$home == $home)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R08 SAVED HOME MISMATCH'"/></do_if>
+     <do_if value="$valid and not (@component.{$p.{4}} == $home)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R09 HOME TRANSPORT MISMATCH'"/></do_if>
+     <do_if value="$valid and not ($template.$entries.count == ($p.count - 5) / 4)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R10 SAVED ENTRY COUNT MISMATCH'"/></do_if>
+     <do_if value="$valid and not ($p.{5} gt 0 and $p.{5} le 9000000000000L)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R11 QUOTED TOTAL OUT OF RANGE'"/></do_if>
+     <do_if value="$valid and not (player.money ge $p.{5} * 1Cr)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R12 INSUFFICIENT CURRENT FUNDS'"/></do_if>
+     <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><do_if value="$valid and @$j.$prepared and $j.$template == $template and $j.$state != 'FLEET ASSEMBLED - HOME PATROL ORDERED'"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R13 PREVIOUS FLEET PURCHASE INCOMPLETE'"/></do_if></do_for_each>
+    </do_if>
+    <set_value name="$detail" exact="'request=%1 | template=%2 | home3=%3 | home4=%4 | jobs=%5 | authority=%6'.[@$p.{1}, @$p.{2}, @$p.{3}, @$p.{4}, global.$JKFOC_NPCJobs.count, @global.$JKFOC_Authority]"/>
+    <set_value name="$detail" exact="$detail + ' | home3-string=%1 | home3-component=%2 | home4-string=%3 | capture=%4'.[(typeof @$p.{3}).isstring, typeof @$p.{3} == datatype.component, (typeof @$p.{4}).isstring, if @global.$JKFOC_NPCCapture then 1 else 0]"/>
+    <set_value name="$entries" exact="[]"/><set_value name="$total" exact="0"/><set_value name="$count" exact="0"/>
+    <do_if value="$valid">
+     <do_for_each name="$e" in="$template.$entries" counter="$i">
+      <set_value name="$offset" exact="6 + ($i - 1) * 4"/><set_value name="$yard" exact="@component.{$p.{$offset}}"/>
+      <set_value name="$macro" exact="$p.{$offset + 1}"/><set_value name="$amount" exact="$p.{$offset + 2}"/><set_value name="$price" exact="$p.{$offset + 3}"/>
+      <set_value name="$entryvalid" exact="$valid"/>
+      <do_if value="$valid and not (@$yard.exists)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R14 SUPPLIER ID DID NOT RESOLVE'"/></do_if>
+      <do_if value="$valid and not ($yard.isclass.station)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R15 SUPPLIER IS NOT A STATION'"/></do_if>
+      <do_if value="$valid and not ($yard.owner != faction.player)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R16 SUPPLIER IS PLAYER OWNED'"/></do_if>
+      <do_if value="$valid and not ($yard.isoperational)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R17 SUPPLIER NOT OPERATIONAL'"/></do_if>
+      <do_if value="$valid and not (@$yard.shiptrader.exists)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R18 SUPPLIER SHIPTRADER MISSING'"/></do_if>
+      <do_if value="$valid and not (not $yard.owner.hastag.noplayerbuyships)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R19 FACTION DISALLOWS PURCHASE'"/></do_if>
+      <do_if value="$valid and not (not $yard.hasrelation.enemy.{faction.player})"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R20 SUPPLIER IS HOSTILE'"/></do_if>
+      <do_if value="$valid and not ($macro == $e.$macro)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R21 SAVED HULL MISMATCH'"/></do_if>
+      <do_if value="$valid and not ($amount == $e.$amount)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R22 SAVED QUANTITY MISMATCH'"/></do_if>
+      <do_if value="$valid and not ($amount ge 1 and $amount le 100 and $amount == ($amount)i)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R23 QUANTITY OUT OF RANGE'"/></do_if>
+      <do_if value="$valid and not ($price gt 0 and $price le 9000000000000L and $price == ($price)i)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R24 UNIT PRICE OUT OF RANGE'"/></do_if>
+      <do_if value="$entryvalid and not $valid"><set_value name="$detail" exact="$detail + ' | entry=%1 | yard=%2 | hull=%3 | amount=%4 | unitprice=%5'.[$i, $p.{$offset}, $macro, $amount, $price]"/></do_if>
+      <append_to_list name="$entries" exact="table[$yard=$yard,$yardkey='%1'.[$p.{$offset}],$macro=$macro,$amount=$amount,$price=$price]"/>
+      <set_value name="$total" operation="add" exact="$amount * $price"/><set_value name="$count" operation="add" exact="$amount"/>
+     </do_for_each>
+     <do_if value="$valid and not ($count le 100)"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R25 TOTAL SHIP LIMIT'"/></do_if>
+     <do_if value="$valid and not ($total == $p.{5})"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'R26 QUOTED TOTAL MISMATCH'"/></do_if>
+    </do_if>
+    <do_if value="$valid">
+     <!-- Persistent non-replayable intent exists BEFORE the one-shot Lua permit. -->
+     <set_value name="$s" exact="table[$schema=2,$prepared=true,$token=global.$JKFOC_NPCNext,$template=$template,$home=$home,$homekey='%1'.[$p.{4}],$started=player.age,$closed=false,$armed=false,$overflow=false,$records=[],$revision=1,$total=$count,$approved=false,$quoteentries=$entries,$quotedtotal=$total,$receipts=[],$submissiondone=false,$submitted=0,$reportedpaid=0,$state='CONFIRMED PURCHASE - SUBMISSION OUTCOME PENDING']"/>
+     <set_value name="global.$JKFOC_NPCCapture" exact="$s"/><set_value name="global.$JKFOC_NPCNext" operation="add" exact="1"/>
+    </do_if>
+    <signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=@$p.{1},$allow=if $valid then 1 else 0,$reason=$reason,$detail=$detail]"/>
+   </actions>
+  </cue>
+  <cue name="Purchase_Receipt" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Procurement'" control="'receipt'"/></conditions>
+   <actions>
+    <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+    <do_if value="@$s.$prepared and (@$p.count == 5 or @$p.count == 6) and $s.$token == $p.{1} and not $s.$submissiondone and $p.{2} == $s.$receipts.count + 1 and $s.$receipts.count lt $s.$total and $p.{3} ge 1 and $p.{3} le $s.$quoteentries.count and $p.{3} == ($p.{3})i and (typeof $p.{4}).isstring">
+     <set_value name="$e" exact="$s.$quoteentries.{$p.{3}}"/>
+     <set_value name="$before" exact="0"/><do_for_each name="$q" in="$s.$quoteentries" counter="$i"><do_if value="$i lt $p.{3}"><set_value name="$before" operation="add" exact="$q.$amount"/></do_if></do_for_each>
+     <set_value name="$unique" exact="true"/><do_for_each name="$r" in="$s.$receipts"><do_if value="$r.$key == $p.{4}"><set_value name="$unique" exact="false"/></do_if></do_for_each>
+     <do_if value="$unique and $p.{2} gt $before and $p.{2} le $before + $e.$amount and $p.{5} == $e.$price">
+      <set_value name="$receipt" exact="table[$ordinal=$p.{2},$entry=$p.{3},$key=$p.{4},$price=$p.{5}]"/>
+      <do_if value="$p.count == 6 and $p.{6} != ''"><set_value name="$receipt.$nativeobject" exact="@component.{$p.{6}}"/></do_if>
+      <append_to_list name="$s.$receipts" exact="$receipt"/>
+      <set_value name="$s.$revision" operation="add" exact="1"/>
+     </do_if>
+    </do_if>
+   </actions>
+  </cue>
+  <cue name="Purchase_Submitted" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Procurement'" control="'submitted'"/></conditions>
+   <actions>
+    <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+    <do_if value="@$s.$prepared and @$p.count == 4 and $p.{1} == $s.$token and not $s.$submissiondone and $p.{2} ge 0 and $p.{2} le $s.$total and $p.{2} == ($p.{2})i and $p.{3} ge 0 and $p.{3} le $s.$quotedtotal">
+     <set_value name="$s.$submissiondone" exact="true"/><set_value name="$s.$submitted" exact="$p.{2}"/><set_value name="$s.$reportedpaid" exact="$p.{3}"/>
+     <set_value name="$s.$state" exact="if $p.{4} == 1 and $p.{2} == $s.$total then 'ORDERS SUBMITTED - VERIFYING EXACT TASKS AND PAYMENT' else 'PARTIAL OR UNCERTAIN PURCHASE - INSPECT X4 ORDERS; DO NOT REPEAT'"/>
+     <set_value name="$s.$revision" operation="add" exact="1"/><signal_cue_instantly cue="Purchase_QueueReport" param="$s"/>
+     <!-- 2 is emitted only when this one-shot executor never entered payment.
+          A thrown/uncertain transfer is 0 and can NEVER clear this lease. -->
+     <do_if value="$p.{4} == 2 and $p.{2} == 0 and $p.{3} == 0 and $s.$receipts.count == 0 and $s.$records.count == 0">
+      <set_value name="$s.$state" exact="'NO PAYMENT OR ORDER ATTEMPTED - RESERVATION RELEASED; PREPARE AGAIN'"/>
+      <remove_value name="global.$JKFOC_NPCCapture"/>
+      <signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=0,$allow=0]"/>
+     </do_if>
+    </do_if>
+   </actions>
+  </cue>
+  <cue name="Purchase_Capture" instantiate="true" namespace="this">
+   <conditions><event_player_build_added/><check_value value="@global.$JKFOC_NPCCapture.$prepared"/></conditions>
+   <actions>
+    <set_value name="$s" exact="global.$JKFOC_NPCCapture"/><set_value name="$matches" exact="false"/>
+    <do_if value="@event.param.exists and event.param.isshipbuild and event.param.faction == faction.player and player.age ge $s.$started and player.age - $s.$started le 30s">
+     <do_for_each name="$e" in="$s.$quoteentries"><do_if value="event.param2 == $e.$yard and event.param.macro.id == $e.$macro"><set_value name="$matches" exact="true"/></do_if></do_for_each>
+     <do_for_each name="$r" in="$s.$records"><do_if value="$r.$task == event.param"><set_value name="$matches" exact="false"/></do_if></do_for_each>
+     <do_if value="$matches">
+      <do_if value="$s.$records.count lt 100"><append_to_list name="$s.$records" exact="table[$id=$s.$records.count + 1,$task=event.param,$yard=event.param2,$macro=event.param.macro,$created=event.param.time,$price=event.param.price,$paid=event.param.transferredamount,$state='QUEUED',$intentproven=false]"/></do_if>
+      <do_else><set_value name="$s.$overflow" exact="true"/><set_value name="$s.$state" exact="'PURCHASE CAPTURE LIMIT - DO NOT REPEAT; INSPECT X4 ORDERS'"/></do_else>
+      <set_value name="$s.$revision" operation="add" exact="1"/><signal_cue_instantly cue="Purchase_QueueReport" param="$s"/>
+     </do_if>
+    </do_if>
+   </actions>
+  </cue>
+  <cue name="Purchase_QueueReport" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <do_if value="not @event.param.$reportpending"><set_value name="event.param.$reportpending" exact="true"/><signal_cue_instantly cue="Purchase_Later" param="event.param"/></do_if>
+  </actions></cue>
+  <cue name="Purchase_Later" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><delay exact="1s"/><actions>
+   <set_value name="event.param.$reportpending" exact="false"/>
+   <do_if value="@global.$JKFOC_NPCCapture == event.param"><signal_cue_instantly cue="Purchase_Report" param="table[$s=event.param,$request=0,$allow=0]"/></do_if>
+  </actions></cue>
+  <cue name="Purchase_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions>
+   <do_if value="@global.$JKFOC_NPCCapture.$prepared">
+    <remove_value name="global.$JKFOC_NPCCapture.$recoveryreview"/>
+    <set_value name="global.$JKFOC_NPCCapture.$reportpending" exact="false"/>
+    <set_value name="global.$JKFOC_NPCCapture.$state" exact="'RELOADED PURCHASE - RECONCILING RETAINED ORDERS; NO PURCHASE REPLAY'"/>
+    <signal_cue_instantly cue="Purchase_QueueReport" param="global.$JKFOC_NPCCapture"/>
+   </do_if>
+  </actions></cue>
+  <cue name="Purchase_Status" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Procurement'" control="'status'"/></conditions><actions>
+   <signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Ensure"/>
+   <set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <do_if value="not @$s.$prepared"><set_value name="$s" exact="null"/></do_if>
+   <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><do_if value="@$j.$prepared and (@event.param3.{2} == $j.$token or (not @global.$JKFOC_NPCCapture.$prepared and @event.param3.{2} == 0))"><set_value name="$s" exact="$j"/></do_if></do_for_each>
+   <signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=@event.param3.{1},$allow=0]"/>
+  </actions></cue>
+  <cue name="Purchase_Bind" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Procurement'" control="'bind'"/></conditions><actions>
+   <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <set_value name="$valid" exact="@$s.$prepared and not $s.$approved and not $s.$overflow and $s.$submissiondone and $s.$submitted == $s.$total and $s.$receipts.count == $s.$total and @$p.count == 2 + 2 * $s.$total and $p.{1} == $s.$token and $p.{2} == $s.$revision and global.$JKFOC_NPCJobs.count lt 20 and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
+   <set_value name="$selected" exact="[]"/>
+   <do_if value="$valid">
+    <do_if value="$s.$template.$entries.count != $s.$quoteentries.count or @$s.$template.$home != $s.$home"><set_value name="$valid" exact="false"/></do_if>
+    <do_for_each name="$e" in="$s.$quoteentries" counter="$i"><do_if value="@$s.$template.$entries.{$i}.$macro != $e.$macro or @$s.$template.$entries.{$i}.$amount != $e.$amount"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+    <do_for_each name="$receipt" in="$s.$receipts" counter="$i">
+     <set_value name="$r" exact="null"/><set_value name="$q" exact="$s.$quoteentries.{$receipt.$entry}"/>
+     <do_for_each name="$candidate" in="$s.$records"><do_if value="$candidate.$id == $p.{1 + 2 * $i}"><set_value name="$r" exact="$candidate"/></do_if></do_for_each>
+     <do_if value="not $r or $selected.indexof.{$r} or $receipt.$key != $p.{2 + 2 * $i}"><set_value name="$valid" exact="false"/></do_if>
+     <do_else>
+      <do_if value="@$r.$task.exists"><set_value name="$r.$paid" exact="$r.$task.transferredamount"/></do_if>
+      <do_if value="@$r.$receiptkey != $receipt.$key or $r.$macro.id != $q.$macro or $r.$yard != $q.$yard or $r.$price != $q.$price * 1Cr or @$r.$paid != $q.$price * 1Cr"><set_value name="$valid" exact="false"/></do_if>
+      <append_to_list name="$selected" exact="$r"/>
+     </do_else>
+    </do_for_each>
+    <set_value name="$candidate" exact="table[$schema=2,$overflow=$s.$overflow,$home=$s.$home,$template=$s.$template,$records=$selected,$total=$s.$total]"/>
+    <set_value name="$check" exact="table[$session=$candidate]"/><signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Validate" param="$check"/><set_value name="$valid" exact="$valid and $check.$valid"/>
+   </do_if>
+   <do_if value="$valid">
+    <set_value name="$s.$approved" exact="true"/><set_value name="$s.$source" exact="'NPC'"/><set_value name="$s.$closed" exact="true"/><set_value name="$s.$deploymentattempted" exact="false"/>
+    <set_value name="$s.$candidates" exact="$s.$records"/><set_value name="$s.$records" exact="$selected"/><set_value name="$s.$ships" exact="$selected"/>
+    <do_for_each name="$r" in="$selected"><set_value name="$r.$intentproven" exact="true"/><do_if value="$r.$state == 'DELIVERED'"><add_to_group groupname="global.$JKFOC_NPCShips" object="$r.$ship"/></do_if></do_for_each>
+    <set_value name="$s.$state" exact="'PAID NATIVE ORDERS VERIFIED - WAITING FOR DELIVERY'"/><set_value name="$s.$revision" operation="add" exact="1"/>
+    <append_to_list name="global.$JKFOC_NPCJobs" exact="$s"/><remove_value name="global.$JKFOC_NPCCapture"/>
+    <signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$s"/>
+   </do_if>
+   <do_if value="$s"><signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=0,$allow=0]"/></do_if>
+  </actions></cue>
+  <!-- Durable association only by the native component returned for a NEW receipt.
+       No lookup of saved numeric task IDs, hull matching, or positional binding. -->
+  <cue name="Purchase_Link" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$s" exact="event.param"/>
+   <do_if value="@$s.$prepared and not $s.$approved and $s.$receipts.count le 100 and $s.$records.count le 100">
+    <do_for_each name="$receipt" in="$s.$receipts">
+     <do_if value="@$receipt.$nativeobject.exists and $receipt.$entry ge 1 and $receipt.$entry le $s.$quoteentries.count">
+      <set_value name="$e" exact="$s.$quoteentries.{$receipt.$entry}"/><set_value name="$match" exact="null"/><set_value name="$matches" exact="0"/><set_value name="$unique" exact="true"/>
+      <do_for_each name="$other" in="$s.$receipts"><do_if value="$other != $receipt and (@$other.$nativeobject == $receipt.$nativeobject or $other.$key == $receipt.$key)"><set_value name="$unique" exact="false"/></do_if></do_for_each>
+      <do_for_each name="$r" in="$s.$records">
+       <set_value name="$object" exact="@$r.$ship"/>
+       <do_if value="@$r.$task.exists"><set_value name="$object" exact="$r.$task.buildobject"/><set_value name="$r.$paid" exact="$r.$task.transferredamount"/></do_if>
+       <do_if value="$object == $receipt.$nativeobject">
+        <set_value name="$matches" operation="add" exact="1"/><set_value name="$match" exact="$r"/>
+       </do_if>
+       <do_if value="@$r.$receiptkey == $receipt.$key and $object != $receipt.$nativeobject"><set_value name="$unique" exact="false"/></do_if>
+      </do_for_each>
+      <do_if value="$unique and $matches == 1 and not $match.$receiptkey? and $match.$yard == $e.$yard and $match.$macro.id == $e.$macro and $match.$price == $e.$price * 1Cr and @$match.$paid == $e.$price * 1Cr and $receipt.$price == $e.$price and $receipt.$nativeobject.owner == faction.player and $receipt.$nativeobject.macro == $match.$macro">
+       <set_value name="$match.$receiptkey" exact="$receipt.$key"/><set_value name="$s.$revision" operation="add" exact="1"/>
+      </do_if>
+     </do_if>
+    </do_for_each>
+   </do_if>
+  </actions></cue>
+  <!-- Present-state consent is not evidence of who created a default order. -->
+  <cue name="Purchase_RecoveryOrders" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$p" exact="event.param"/><set_value name="$r" exact="$p.$record"/><set_value name="$ship" exact="$r.$ship"/>
+   <set_value name="$p.$valid" exact="false"/><set_value name="$p.$reason" exact="'Current or default orders differ from the retained history.'"/>
+   <do_if value="@$ship.commander or $ship.allsubordinates.count"><set_value name="$p.$reason" exact="'Ship has a commander or subordinates; recovery will not replace assignments.'"/></do_if>
+   <do_elseif value="not $ship.orders? or $ship.orders.count != 0"><set_value name="$p.$reason" exact="'Order queue is not proven empty; recovery will not cancel queued work.'"/></do_elseif>
+   <do_elseif value="(if @$ship.order.exists then $ship.order == @$r.$oldorder else not @$r.$oldorder.exists) and (if @$ship.defaultorder.exists then $ship.defaultorder == @$r.$olddefault else not @$r.$olddefault.exists)"><set_value name="$p.$valid" exact="true"/><set_value name="$p.$reason" exact="'Current orders match retained history; queue is empty.'"/></do_elseif>
+   <do_elseif value="not @$r.$oldorder and not @$r.$olddefault and @$ship.defaultorder.exists and $ship.order == $ship.defaultorder and $ship.defaultorder.id == 'Wait' and not $ship.order.isoverride and $ship.defaultorder.$timeout? and $ship.defaultorder.$timeout == 0s and $ship.defaultorder.$holdfire? and not $ship.defaultorder.$holdfire"><set_value name="$p.$valid" exact="true"/><set_value name="$p.$reason" exact="'Missing historical orders; current default Hold Position requires explicit recovery approval.'"/></do_elseif>
+   <debug_text text="'[FOC][B072][RECOVERY_ORDER_CHECK] record=%1 ship=%2 valid=%3 queue=%4 current=%5 default=%6 oldcurrent=%7 olddefault=%8 reason=%9'.[$r.$id,$ship.idcode,$p.$valid,if $ship.orders? then $ship.orders.count else -1,if @$ship.order.exists then $ship.order.id else 'NONE',if @$ship.defaultorder.exists then $ship.defaultorder.id else 'NONE',if @$r.$oldorder.exists then $r.$oldorder.id else 'NONE',if @$r.$olddefault.exists then $r.$olddefault.id else 'NONE',$p.$reason]"/>
+   <debug_text text="'[FOC][B072][RECOVERY_ORDER_REFS] record=%1 current_ref=%2 default_ref=%3 oldcurrent_ref=%4 olddefault_ref=%5 timeout=%6 holdfire=%7 override=%8 commander=%9'.[$r.$id,@$ship.order,@$ship.defaultorder,@$r.$oldorder,@$r.$olddefault,@$ship.defaultorder.$timeout,@$ship.defaultorder.$holdfire,@$ship.order.isoverride,@$ship.commander]"/>
+  </actions></cue>
+  <!-- Explicit group recovery does not invent original per-receipt associations. -->
+  <cue name="Purchase_RecoveryCheck" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$p" exact="event.param"/><set_value name="$s" exact="$p.$session"/>
+   <set_value name="$p.$valid" exact="@$s.$schema == 2 and @$s.$prepared and not $s.$approved and not $s.$overflow and $s.$submissiondone and $s.$submitted == $s.$total and $s.$records.count == $s.$total and $s.$receipts.count == $s.$total and $s.$total ge 1 and $s.$total le 100 and $s.$quoteentries.count ge 1 and $s.$quoteentries.count le 8 and $s.$reportedpaid == $s.$quotedtotal and $s.$quotedtotal gt 0 and global.$JKFOC_NPCJobs.count lt 20 and global.$JKFOC_ProtectedShipIDs? and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
+   <set_value name="$p.$reason" exact="'Recovery requires complete retained orders, receipts and delivered ships. Nothing was purchased or charged. Check native construction; missing historical records cannot be guessed.'"/>
+   <do_if value="$p.$valid">
+    <set_value name="$check" exact="table[$session=$s]"/><signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Validate" param="$check"/>
+    <set_value name="$p.$valid" exact="$check.$valid and @$s.$template.$home == $s.$home and $s.$template.$entries.count == $s.$quoteentries.count"/>
+    <set_value name="$ids" exact="[]"/><set_value name="$keys" exact="[]"/><set_value name="$sum" exact="0"/><set_value name="$receiptSum" exact="0"/>
+    <do_for_each name="$e" in="$s.$quoteentries" counter="$i">
+     <do_if value="@$s.$template.$entries.{$i}.$macro != $e.$macro or @$s.$template.$entries.{$i}.$amount != $e.$amount"><set_value name="$p.$valid" exact="false"/></do_if>
+     <set_value name="$count" exact="0"/><do_for_each name="$receipt" in="$s.$receipts"><do_if value="$receipt.$entry == $i"><set_value name="$count" operation="add" exact="1"/></do_if></do_for_each><do_if value="$count != $e.$amount"><set_value name="$p.$valid" exact="false"/></do_if>
+    </do_for_each>
+    <do_for_each name="$receipt" in="$s.$receipts" counter="$i">
+     <do_if value="$receipt.$ordinal != $i or $keys.indexof.{$receipt.$key} or not (typeof $receipt.$key).isstring or $receipt.$key == '' or $receipt.$entry lt 1 or $receipt.$entry gt $s.$quoteentries.count"><set_value name="$p.$valid" exact="false"/></do_if>
+     <do_else><do_if value="$receipt.$price != $s.$quoteentries.{$receipt.$entry}.$price"><set_value name="$p.$valid" exact="false"/></do_if></do_else>
+     <append_to_list name="$keys" exact="$receipt.$key"/><set_value name="$receiptSum" operation="add" exact="$receipt.$price"/>
+    </do_for_each>
+    <do_for_each name="$r" in="$s.$records">
+     <set_value name="$ship" exact="@$r.$ship"/><set_value name="$matches" exact="0"/>
+     <do_for_each name="$e" in="$s.$quoteentries"><do_if value="$r.$yard == $e.$yard and $r.$macro.id == $e.$macro and $r.$price == $e.$price * 1Cr and @$r.$paid == $e.$price * 1Cr"><set_value name="$matches" operation="add" exact="1"/></do_if></do_for_each>
+     <do_if value="$ids.indexof.{$r.$id} or $matches != 1 or $r.$state != 'DELIVERED' or not @$ship.exists"><set_value name="$p.$valid" exact="false"/></do_if>
+     <do_elseif value="$ship.owner != faction.player or not $ship.isoperational or $ship.macro != $r.$macro or $ship == player.controlled or $ship.ismission or not @$ship.assignedpilot.exists or global.$JKFOC_ProtectedShipIDs.indexof.{$ship.idcode} or $ship == @md.Story_Terraforming.Start.$BettyShip"><set_value name="$p.$valid" exact="false"/></do_elseif>
+     <do_else><set_value name="$ordercheck" exact="table[$record=$r]"/><signal_cue_instantly cue="Purchase_RecoveryOrders" param="$ordercheck"/><do_if value="not $ordercheck.$valid"><set_value name="$p.$valid" exact="false"/><set_value name="$p.$reason" exact="'%1: %2 No charge or purchase.'.[$ship.idcode,$ordercheck.$reason]"/></do_if></do_else>
+     <append_to_list name="$ids" exact="$r.$id"/><set_value name="$sum" operation="add" exact="$r.$price / 1Cr"/>
+    </do_for_each>
+    <do_if value="$sum != $s.$quotedtotal or $receiptSum != $s.$quotedtotal"><set_value name="$p.$valid" exact="false"/></do_if>
+   </do_if>
+   <do_if value="$p.$valid"><set_value name="$p.$reason" exact="'All retained ships passed current recovery checks. Review their identities, then confirm this fleet once. Original receipts remain unchanged; no charge.'"/></do_if>
+  </actions></cue>
+  <cue name="Purchase_RecoveryReview" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Procurement'" control="'recoverreview'"/></conditions><actions>
+   <signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Ensure"/>
+   <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <do_if value="@$s.$prepared and @$p.count == 3 and $p.{2} == $s.$token and $p.{3} == $s.$revision">
+    <remove_value name="$s.$recoveryreview"/>
+    <set_value name="$check" exact="table[$session=$s]"/><signal_cue_instantly cue="Purchase_RecoveryCheck" param="$check"/>
+    <set_value name="$s.$recoverymessage" exact="$check.$reason"/>
+    <do_if value="$check.$valid">
+     <set_value name="$s.$recoveryreview" exact="table[$revision=$s.$revision,$time=player.age,$rows=[]]"/>
+     <do_for_each name="$r" in="$s.$records"><append_to_list name="$s.$recoveryreview.$rows" exact="table[$id=$r.$id,$ship=$r.$ship,$order=@$r.$ship.order,$default=@$r.$ship.defaultorder,$holdfire=@$r.$ship.defaultorder.$holdfire,$timeout=@$r.$ship.defaultorder.$timeout,$allowdocked=@$r.$ship.defaultorder.$allowdocked]"/></do_for_each>
+    </do_if>
+   </do_if>
+   <signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=@$p.{1},$allow=0]"/>
+  </actions></cue>
+  <cue name="Purchase_Recover" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Procurement'" control="'recover'"/></conditions><actions>
+   <signal_cue_instantly cue="md.FOC_NPC_Purchases.NPC_Ensure"/>
+   <set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <set_value name="$valid" exact="@$s.$prepared and @$p.count == 3 and $p.{2} == $s.$token and $p.{3} == $s.$revision and @$s.$recoveryreview.$revision == $s.$revision and player.age ge @$s.$recoveryreview.$time and player.age - @$s.$recoveryreview.$time le 120s and @$s.$recoveryreview.$rows.count == $s.$records.count"/>
+   <do_if value="$valid">
+    <set_value name="$check" exact="table[$session=$s]"/><signal_cue_instantly cue="Purchase_RecoveryCheck" param="$check"/><set_value name="$valid" exact="$check.$valid"/>
+    <do_for_each name="$r" in="$s.$records"><set_value name="$matches" exact="0"/><do_for_each name="$w" in="$s.$recoveryreview.$rows"><do_if value="$w.$id == $r.$id and $w.$ship == @$r.$ship and @$w.$order == @$r.$ship.order and @$w.$default == @$r.$ship.defaultorder and @$w.$holdfire == @$r.$ship.defaultorder.$holdfire and @$w.$timeout == @$r.$ship.defaultorder.$timeout and @$w.$allowdocked == @$r.$ship.defaultorder.$allowdocked"><set_value name="$matches" operation="add" exact="1"/></do_if></do_for_each><do_if value="$matches != 1"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+   </do_if>
+   <do_if value="@$s.$prepared"><remove_value name="$s.$recoveryreview"/><set_value name="$s.$recoverymessage" exact="'Recovery not applied: the review expired or retained evidence changed. Review again; no payment or purchase was attempted.'"/></do_if>
+   <do_if value="$valid">
+    <!-- Consume once, preserve historical receipts, then use the unchanged guarded deployment route. -->
+    <set_value name="$s.$approved" exact="true"/><set_value name="$s.$recovered" exact="true"/><set_value name="$s.$recoveredat" exact="player.age"/>
+    <set_value name="$s.$source" exact="'NPC'"/><set_value name="$s.$closed" exact="true"/><set_value name="$s.$deploymentattempted" exact="false"/><set_value name="$s.$ships" exact="$s.$records"/>
+    <do_for_each name="$r" in="$s.$records"><set_value name="$r.$recoveryorders" exact="true"/><set_value name="$r.$recoveryorder" exact="@$r.$ship.order"/><set_value name="$r.$recoverydefault" exact="@$r.$ship.defaultorder"/><set_value name="$r.$recoveryholdfire" exact="@$r.$ship.defaultorder.$holdfire"/><set_value name="$r.$recoverytimeout" exact="@$r.$ship.defaultorder.$timeout"/><set_value name="$r.$recoveryallowdocked" exact="@$r.$ship.defaultorder.$allowdocked"/><set_value name="$r.$intentproven" exact="true"/><add_to_group groupname="global.$JKFOC_NPCShips" object="$r.$ship"/></do_for_each>
+    <set_value name="$s.$state" exact="'PLAYER-CONFIRMED RECOVERY - ASSEMBLY PENDING'"/><set_value name="$s.$recoverymessage" exact="'Retained fleet recovery confirmed. No new charge or purchase. Historical receipt links were not reconstructed.'"/><set_value name="$s.$revision" operation="add" exact="1"/>
+    <append_to_list name="global.$JKFOC_NPCJobs" exact="$s"/><remove_value name="global.$JKFOC_NPCCapture"/>
+    <signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$s"/>
+   </do_if>
+   <signal_cue_instantly cue="Purchase_Report" param="table[$s=$s,$request=@$p.{1},$allow=0]"/>
+  </actions></cue>
+  <cue name="Purchase_Report" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$s" exact="event.param.$s"/>
+   <do_if value="@$s.$prepared"><signal_cue_instantly cue="Purchase_Link" param="$s"/></do_if>
+   <raise_lua_event name="'FOC_Procurement.begin'" param="event.param.$request"/>
+   <raise_lua_event name="'FOC_Procurement.protocol'" param="2"/>
+   <raise_lua_event name="'FOC_Procurement.recoveryready'" param="if @$s.$recoveryreview.$revision == @$s.$revision and @$s.$recoveryreview then 1 else 0"/>
+   <raise_lua_event name="'FOC_Procurement.recoveryreason'" param="if @$s.$recoverymessage then $s.$recoverymessage else 'Review retained ships if automatic receipt matching is unavailable. No payment or purchase is repeated.'"/>
+   <raise_lua_event name="'FOC_Procurement.allow'" param="event.param.$allow"/>
+   <raise_lua_event name="'FOC_Procurement.reason'" param="if event.param.$reason? then event.param.$reason else ''"/>
+   <raise_lua_event name="'FOC_Procurement.detail'" param="if event.param.$detail? then event.param.$detail else ''"/>
+   <do_if value="$s and @$s.$prepared">
+    <raise_lua_event name="'FOC_Procurement.token'" param="$s.$token"/><raise_lua_event name="'FOC_Procurement.revision'" param="$s.$revision"/>
+    <raise_lua_event name="'FOC_Procurement.template'" param="$s.$template.$id"/><raise_lua_event name="'FOC_Procurement.home'" param="$s.$homekey"/>
+    <raise_lua_event name="'FOC_Procurement.total'" param="$s.$quotedtotal"/><raise_lua_event name="'FOC_Procurement.expected'" param="$s.$total"/>
+    <raise_lua_event name="'FOC_Procurement.reportedpaid'" param="$s.$reportedpaid"/>
+    <raise_lua_event name="'FOC_Procurement.state'" param="if $s.$deploymentmessage? then $s.$state + ': ' + $s.$deploymentmessage else $s.$state"/>
+    <raise_lua_event name="'FOC_Procurement.done'" param="if $s.$submissiondone then 1 else 0"/><raise_lua_event name="'FOC_Procurement.submitted'" param="$s.$submitted"/>
+    <raise_lua_event name="'FOC_Procurement.approved'" param="if $s.$approved then 1 else 0"/><raise_lua_event name="'FOC_Procurement.overflow'" param="if $s.$overflow then 1 else 0"/>
+    <do_for_each name="$e" in="$s.$quoteentries" counter="$i">
+     <raise_lua_event name="'FOC_Procurement.entry'" param="$i"/><raise_lua_event name="'FOC_Procurement.field.yard'" param="'%1'.[$e.$yardkey]"/>
+     <raise_lua_event name="'FOC_Procurement.field.macro'" param="$e.$macro"/><raise_lua_event name="'FOC_Procurement.field.amount'" param="$e.$amount"/><raise_lua_event name="'FOC_Procurement.field.price'" param="$e.$price"/><raise_lua_event name="'FOC_Procurement.commit'"/>
+    </do_for_each>
+    <do_for_each name="$r" in="$s.$receipts" counter="$i">
+     <raise_lua_event name="'FOC_Procurement.receipt'" param="$i"/><raise_lua_event name="'FOC_Procurement.field.key'" param="$r.$key"/><raise_lua_event name="'FOC_Procurement.field.entryindex'" param="$r.$entry"/><raise_lua_event name="'FOC_Procurement.commit'"/>
+    </do_for_each>
+    <do_for_each name="$r" in="$s.$records" counter="$i">
+     <do_if value="@$r.$task.exists"><set_value name="$r.$paid" exact="$r.$task.transferredamount"/></do_if>
+     <set_value name="$yardkey" exact="''"/><do_for_each name="$e" in="$s.$quoteentries"><do_if value="$e.$yard == $r.$yard"><set_value name="$yardkey" exact="'%1'.[$e.$yardkey]"/></do_if></do_for_each>
+     <raise_lua_event name="'FOC_Procurement.row'" param="$i"/>
+     <raise_lua_event name="'FOC_Procurement.field.recordid'" param="$r.$id"/>
+     <raise_lua_event name="'FOC_Procurement.field.receiptkey'" param="if $r.$receiptkey? then $r.$receiptkey else ''"/>
+     <raise_lua_event name="'FOC_Procurement.field.shiplabel'" param="if @$r.$ship.exists then $r.$ship.idcode else 'NOT DELIVERED / UNAVAILABLE'"/>
+     <raise_lua_event name="'FOC_Procurement.field.yard'" param="$yardkey"/><raise_lua_event name="'FOC_Procurement.field.macro'" param="$r.$macro.id"/>
+     <raise_lua_event name="'FOC_Procurement.field.price'" param="$r.$price / 1Cr"/><raise_lua_event name="'FOC_Procurement.field.paid'" param="if $r.$paid? then $r.$paid / 1Cr else -1"/>
+     <raise_lua_event name="'FOC_Procurement.field.rowstate'" param="$r.$state"/><raise_lua_event name="'FOC_Procurement.commit'"/>
+    </do_for_each>
+    <raise_lua_event name="'FOC_Procurement.entrycount'" param="$s.$quoteentries.count"/><raise_lua_event name="'FOC_Procurement.receiptcount'" param="$s.$receipts.count"/><raise_lua_event name="'FOC_Procurement.count'" param="$s.$records.count"/>
+   </do_if>
+   <do_else>
+    <raise_lua_event name="'FOC_Procurement.token'" param="0"/><raise_lua_event name="'FOC_Procurement.revision'" param="0"/><raise_lua_event name="'FOC_Procurement.template'" param="0"/><raise_lua_event name="'FOC_Procurement.home'" param="''"/>
+    <raise_lua_event name="'FOC_Procurement.total'" param="0"/><raise_lua_event name="'FOC_Procurement.expected'" param="0"/><raise_lua_event name="'FOC_Procurement.done'" param="0"/><raise_lua_event name="'FOC_Procurement.submitted'" param="0"/>
+    <raise_lua_event name="'FOC_Procurement.reportedpaid'" param="0"/>
+    <raise_lua_event name="'FOC_Procurement.approved'" param="0"/><raise_lua_event name="'FOC_Procurement.overflow'" param="0"/><raise_lua_event name="'FOC_Procurement.entrycount'" param="0"/><raise_lua_event name="'FOC_Procurement.receiptcount'" param="0"/><raise_lua_event name="'FOC_Procurement.count'" param="0"/>
+    <raise_lua_event name="'FOC_Procurement.state'" param="'No prepared order selected or reservation refused. Check the saved fleet, Home, FOC authority, balance and existing purchase tracking.'"/>
+   </do_else>
+   <raise_lua_event name="'FOC_Procurement.complete'"/>
+  </actions></cue>
+ </cues>
+</mdscript>

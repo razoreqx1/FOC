@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_NPC_Purchases" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="NPC_Ensure" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <do_if value="not global.$JKFOC_NPCNext?"><set_value name="global.$JKFOC_NPCNext" exact="1"/></do_if>
+   <do_if value="not global.$JKFOC_NPCJobs?"><set_value name="global.$JKFOC_NPCJobs" exact="[]"/></do_if>
+   <do_if value="not global.$JKFOC_NPCShips?"><create_group groupname="global.$JKFOC_NPCShips"/></do_if>
+  </actions></cue>
+  <cue name="NPC_Start" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_NPC_Purchases'" control="'start'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$p" exact="event.param3"/><set_value name="$template" exact="null"/>
+    <set_value name="$valid" exact="@$p.count == 7 and not @global.$JKFOC_NPCCapture.$prepared and global.$JKFOC_NPCJobs.count lt 20 and global.$JKFOC_AdvisorTemplates? and global.$JKFOC_AdvisorTemplates.count le 20"/>
+    <set_value name="$expected" exact="0"/><set_value name="$total" exact="0"/><set_value name="$macros" exact="[]"/>
+    <do_if value="$valid">
+     <set_value name="$p.{3}" exact="@component.{$p.{3}}"/><set_value name="$p.{4}" exact="@component.{$p.{4}}"/>
+     <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates"><do_if value="$t.$id == $p.{2}"><set_value name="$template" exact="$t"/></do_if></do_for_each>
+     <set_value name="$valid" exact="$template and @$p.{3}.exists and $p.{3}.isclass.sector and @$p.{4}.exists and $p.{4}.isclass.station and $p.{4}.owner != faction.player and $p.{4}.isoperational and $template.$entries.count ge 1 and $template.$entries.count le 8"/>
+     <do_if value="$valid"><set_value name="$valid" exact="@$template.$home.exists and $template.$home == $p.{3}"/></do_if>
+    </do_if>
+    <do_if value="$valid">
+     <do_for_each name="$e" in="$template.$entries">
+      <do_if value="$e.$amount lt 1 or $e.$amount gt 100 or $e.$amount != ($e.$amount)i or $macros.indexof.{$e.$macro}"><set_value name="$valid" exact="false"/></do_if>
+      <append_to_list name="$macros" exact="$e.$macro"/><set_value name="$total" operation="add" exact="$e.$amount"/>
+      <do_if value="$e.$macro == $p.{5}"><set_value name="$expected" exact="$e.$amount"/></do_if>
+     </do_for_each>
+     <set_value name="$session" exact="@global.$JKFOC_NPCCapture"/>
+     <do_if value="$session">
+      <do_if value="@$session.$schema != 2 or $session.$closed or $session.$overflow or $session.$template != $template or $session.$home != $p.{3} or $session.$homekey != $p.{7} or player.age lt $session.$started or player.age - $session.$started gt 30min"><set_value name="$valid" exact="false"/></do_if>
+      <do_else><do_for_each name="$r" in="$session.$records"><do_if value="$r.$macro.id == $p.{5}"><set_value name="$expected" operation="subtract" exact="1"/></do_if></do_for_each></do_else>
+     </do_if>
+     <set_value name="$valid" exact="$valid and $total le 100 and $expected ge 1 and $p.{6} == $expected and $p.{6} == ($p.{6})i"/>
+    </do_if>
+    <do_if value="$valid">
+     <do_if value="not $session">
+      <set_value name="$session" exact="table[$schema=2,$token=global.$JKFOC_NPCNext,$template=$template,$home=$p.{3},$homekey=$p.{7},$started=player.age,$closed=false,$overflow=false,$records=[],$revision=0,$total=$total,$approved=false]"/>
+      <set_value name="global.$JKFOC_NPCCapture" exact="$session"/><set_value name="global.$JKFOC_NPCNext" operation="add" exact="1"/>
+     </do_if>
+     <set_value name="$session.$yard" exact="$p.{4}"/><set_value name="$session.$expectedmacro" exact="$p.{5}"/><set_value name="$session.$expectedquantity" exact="$expected"/>
+     <set_value name="$session.$armed" exact="true"/><set_value name="$session.$state" exact="'CAPTURING REVIEW CANDIDATES'"/><set_value name="$session.$revision" operation="add" exact="1"/><remove_value name="$session.$review"/>
+    </do_if>
+    <raise_lua_event name="'FOC_NPC_Purchases.request'" param="@$p.{1}"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.started'" param="if $valid then $session.$token else 0"/>
+    <signal_cue_instantly cue="NPC_Snapshot" param="table[$session=if $valid then $session else null]"/>
+   </actions>
+  </cue>
+  <cue name="NPC_Added" instantiate="true" namespace="this">
+   <conditions><event_player_build_added/><check_value value="@global.$JKFOC_NPCCapture.$armed"/></conditions>
+   <actions>
+    <set_value name="$session" exact="global.$JKFOC_NPCCapture"/>
+    <do_if value="player.age lt $session.$started or player.age - $session.$started gt 30min">
+     <set_value name="$session.$armed" exact="false"/><set_value name="$session.$closed" exact="true"/><set_value name="$session.$state" exact="'CAPTURE EXPIRED'"/><set_value name="$session.$revision" operation="add" exact="1"/>
+    </do_if>
+    <do_elseif value="@event.param.exists and event.param.isshipbuild and event.param.faction == faction.player and event.param2 == $session.$yard and event.param2.owner != faction.player and event.param.macro.id == $session.$expectedmacro">
+     <set_value name="$duplicate" exact="false"/>
+     <do_for_each name="$r" in="$session.$records"><do_if value="$r.$task == event.param"><set_value name="$duplicate" exact="true"/></do_if></do_for_each>
+     <do_if value="not $duplicate">
+      <do_if value="$session.$records.count lt 100">
+       <append_to_list name="$session.$records" exact="table[$id=$session.$records.count + 1,$task=event.param,$yard=event.param2,$macro=event.param.macro,$created=event.param.time,$price=event.param.price,$state='QUEUED',$intentproven=false]"/>
+      </do_if>
+      <do_else><set_value name="$session.$overflow" exact="true"/><set_value name="$session.$armed" exact="false"/><set_value name="$session.$closed" exact="true"/><set_value name="$session.$state" exact="'CAPTURE OVERFLOW'"/></do_else>
+      <set_value name="$session.$revision" operation="add" exact="1"/><remove_value name="$session.$review"/>
+     </do_if>
+    </do_elseif>
+   </actions>
+  </cue>
+  <cue name="NPC_Finished" instantiate="true" namespace="this">
+   <conditions><event_player_build_finished/></conditions>
+   <actions>
+    <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$sessions" exact="[]"/>
+    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
+    <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><append_to_list name="$sessions" exact="$j"/></do_for_each>
+    <do_for_each name="$session" in="$sessions"><do_for_each name="$r" in="$session.$records">
+     <do_if value="$r.$task == event.param3 and $r.$state == 'QUEUED'">
+      <do_if value="@$session.$prepared and @event.param3.exists"><set_value name="$r.$paid" exact="event.param3.transferredamount"/></do_if>
+      <set_value name="$ship" exact="@event.param3.buildobject"/>
+      <do_if value="$ship and $ship.exists and $ship.owner == faction.player and $ship.isoperational and $ship.macro == $r.$macro">
+       <set_value name="$r.$ship" exact="$ship"/><set_value name="$r.$state" exact="'DELIVERED'"/>
+       <set_value name="$r.$oldorder" exact="@$ship.order"/><set_value name="$r.$olddefault" exact="@$ship.defaultorder"/>
+       <do_if value="@$session.$approved"><add_to_group groupname="global.$JKFOC_NPCShips" object="$ship"/></do_if>
+      </do_if>
+      <do_else><set_value name="$r.$state" exact="'DELIVERY UNCONFIRMED'"/></do_else>
+      <set_value name="$session.$revision" operation="add" exact="1"/><remove_value name="$session.$review"/>
+      <do_if value="@$session.$approved"><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$session"/></do_if>
+      <do_elseif value="@$session.$prepared"><signal_cue_instantly cue="md.FOC_Procurement.Purchase_QueueReport" param="$session"/></do_elseif>
+     </do_if>
+    </do_for_each></do_for_each>
+   </actions>
+  </cue>
+  <cue name="NPC_Cancelled" instantiate="true" namespace="this">
+   <conditions><event_player_build_cancelled/></conditions>
+   <actions>
+    <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$sessions" exact="[]"/>
+    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
+    <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><append_to_list name="$sessions" exact="$j"/></do_for_each>
+    <do_for_each name="$session" in="$sessions"><do_for_each name="$r" in="$session.$records">
+     <do_if value="$r.$task == event.param and $r.$state == 'QUEUED'"><set_value name="$r.$state" exact="'CANCELLED'"/><set_value name="$session.$revision" operation="add" exact="1"/><remove_value name="$session.$review"/></do_if>
+    </do_for_each></do_for_each>
+   </actions>
+  </cue>
+  <cue name="NPC_Init"><actions><signal_cue_instantly cue="NPC_Ensure"/></actions><cues>
+   <cue name="NPC_Captain" instantiate="true" namespace="this">
+    <conditions><event_control_entity_added group="global.$JKFOC_NPCShips"/></conditions>
+    <actions><do_for_each name="$j" in="global.$JKFOC_NPCJobs"><do_for_each name="$r" in="$j.$records"><do_if value="@$r.$ship == event.object and not $j.$deploymentattempted"><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$j"/></do_if></do_for_each></do_for_each></actions>
+   </cue>
+  </cues></cue>
+  <cue name="NPC_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions>
+   <signal_cue_instantly cue="NPC_Ensure"/>
+   <do_if value="@global.$JKFOC_NPCCapture and not @global.$JKFOC_NPCCapture.$prepared"><set_value name="global.$JKFOC_NPCCapture.$armed" exact="false"/><set_value name="global.$JKFOC_NPCCapture.$closed" exact="true"/><remove_value name="global.$JKFOC_NPCCapture.$review"/><set_value name="global.$JKFOC_NPCCapture.$state" exact="'RELOADED - CAPTURE CLOSED'"/></do_if>
+   <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><remove_value name="$j.$review"/><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$j"/></do_for_each>
+  </actions></cue>
+  <cue name="NPC_Validate" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$p" exact="event.param"/><set_value name="$s" exact="$p.$session"/>
+   <set_value name="$p.$valid" exact="@$s.$schema == 2 and not $s.$overflow and $s.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$s.$template} and $s.$records.count == $s.$total and $s.$total ge 1 and $s.$total le 100"/>
+   <set_value name="$seen" exact="[]"/><set_value name="$ships" exact="[]"/>
+   <do_if value="$p.$valid">
+    <do_for_each name="$e" in="$s.$template.$entries"><set_value name="$count" exact="0"/><do_for_each name="$r" in="$s.$records"><do_if value="$r.$macro.id == $e.$macro"><set_value name="$count" operation="add" exact="1"/></do_if></do_for_each><do_if value="$count != $e.$amount"><set_value name="$p.$valid" exact="false"/></do_if></do_for_each>
+    <do_for_each name="$r" in="$s.$records">
+     <do_if value="@$r.$task.exists"><do_if value="$seen.indexof.{$r.$task}"><set_value name="$p.$valid" exact="false"/></do_if><append_to_list name="$seen" exact="$r.$task"/></do_if>
+     <do_if value="$r.$state == 'QUEUED'">
+      <do_if value="not @$r.$task.exists or $r.$task.iscancelled or $r.$task.faction != faction.player or $r.$task.macro != $r.$macro or $r.$task.object != $r.$yard"><set_value name="$p.$valid" exact="false"/></do_if>
+     </do_if>
+     <do_elseif value="$r.$state == 'DELIVERED'">
+      <do_if value="not @$r.$ship.exists or $r.$ship.owner != faction.player or not $r.$ship.isoperational or $r.$ship.macro != $r.$macro or $ships.indexof.{$r.$ship}"><set_value name="$p.$valid" exact="false"/></do_if>
+      <do_elseif value="@$r.$task.exists and (@$r.$task.buildobject != $r.$ship or $r.$task.macro != $r.$macro or $r.$task.object != $r.$yard or $r.$task.iscancelled)"><set_value name="$p.$valid" exact="false"/></do_elseif>
+      <append_to_list name="$ships" exact="@$r.$ship"/>
+     </do_elseif>
+     <do_else><set_value name="$p.$valid" exact="false"/></do_else>
+    </do_for_each>
+   </do_if>
+  </actions></cue>
+  <cue name="NPC_Status" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_NPC_Purchases'" control="'status'"/></conditions><actions>
+   <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <set_value name="$p" exact="event.param3"/>
+   <raise_lua_event name="'FOC_NPC_Purchases.request'" param="@$p.{1}"/><raise_lua_event name="'FOC_NPC_Purchases.started'" param="0"/>
+   <do_for_each name="$j" in="global.$JKFOC_NPCJobs">
+    <raise_lua_event name="'FOC_NPC_Purchases.job'" param="$j.$token"/><raise_lua_event name="'FOC_NPC_Purchases.jobname'" param="$j.$template.$name"/><raise_lua_event name="'FOC_NPC_Purchases.jobstate'" param="$j.$state"/><raise_lua_event name="'FOC_NPC_Purchases.jobcommit'"/>
+    <do_if value="@$p.{2} == $j.$token"><set_value name="$s" exact="$j"/></do_if>
+   </do_for_each>
+   <raise_lua_event name="'FOC_NPC_Purchases.jobcount'" param="global.$JKFOC_NPCJobs.count"/>
+   <do_if value="not $s and global.$JKFOC_NPCJobs.count"><set_value name="$s" exact="global.$JKFOC_NPCJobs.{global.$JKFOC_NPCJobs.count}"/></do_if>
+   <do_if value="$s and @$s.$schema == 2">
+    <set_value name="$s.$armed" exact="false"/>
+    <do_if value="not $s.$approved and not @$s.$prepared and player.age - $s.$started gt 30min"><set_value name="$s.$closed" exact="true"/><set_value name="$s.$state" exact="'CAPTURE EXPIRED'"/></do_if>
+    <set_value name="$s.$review" exact="if not $s.$overflow and not $s.$approved then $s.$revision else -1"/>
+    <!-- Immutable exact-record witness for the next explicit subset approval. -->
+    <set_value name="$s.$reviewrecords" exact="[]"/>
+    <do_for_each name="$r" in="$s.$records"><append_to_list name="$s.$reviewrecords" exact="table[$id=$r.$id,$task=$r.$task,$state=$r.$state,$ship=@$r.$ship,$yard=$r.$yard,$macro=$r.$macro,$created=$r.$created,$price=$r.$price]"/></do_for_each>
+   </do_if>
+   <signal_cue_instantly cue="NPC_Snapshot" param="table[$session=$s]"/>
+  </actions></cue>
+  <cue name="NPC_Approve" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_NPC_Purchases'" control="'approve'"/></conditions><actions>
+   <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$p" exact="event.param3"/><set_value name="$s" exact="@global.$JKFOC_NPCCapture"/>
+   <do_if value="@$p.count ge 6 and @$p.count le 105"><set_value name="$p.{4}" exact="@component.{$p.{4}}"/></do_if>
+   <set_value name="$valid" exact="@$p.count ge 6 and @$p.count le 105 and $s and @$s.$schema == 2 and not @$s.$prepared and not $s.$approved and not $s.$armed and $s.$token == $p.{2} and @$s.$review == $p.{3} and $s.$revision == $p.{3} and $s.$home == $p.{4} and $s.$template.$id == $p.{5} and global.$JKFOC_NPCJobs.count lt 20 and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
+   <set_value name="$selected" exact="[]"/>
+   <do_if value="$valid">
+    <do_for_each name="$id" in="$p" counter="$i"><do_if value="$i gt 5">
+     <set_value name="$record" exact="null"/>
+     <do_for_each name="$r" in="$s.$records"><do_if value="$r.$id == $id"><set_value name="$record" exact="$r"/></do_if></do_for_each>
+     <do_if value="not $record or $selected.indexof.{$record}"><set_value name="$valid" exact="false"/></do_if>
+     <do_else>
+      <set_value name="$unchanged" exact="false"/>
+      <do_for_each name="$w" in="$s.$reviewrecords"><do_if value="$w.$id == $record.$id and $w.$task == $record.$task and $w.$state == $record.$state and @$w.$ship == @$record.$ship and $w.$yard == $record.$yard and $w.$macro == $record.$macro and $w.$created == $record.$created and $w.$price == $record.$price"><set_value name="$unchanged" exact="true"/></do_if></do_for_each>
+      <do_if value="not $unchanged"><set_value name="$valid" exact="false"/></do_if>
+      <append_to_list name="$selected" exact="$record"/>
+     </do_else>
+    </do_if></do_for_each>
+    <set_value name="$candidate" exact="table[$schema=2,$overflow=$s.$overflow,$home=$s.$home,$template=$s.$template,$records=$selected,$total=$s.$total]"/>
+    <set_value name="$check" exact="table[$session=$candidate]"/><signal_cue_instantly cue="NPC_Validate" param="$check"/><set_value name="$valid" exact="$valid and $check.$valid"/>
+   </do_if>
+   <do_if value="$valid">
+    <!-- Consume approval before adding persistent deployment membership. -->
+    <remove_value name="$s.$review"/><set_value name="$s.$approved" exact="true"/><set_value name="$s.$source" exact="'NPC'"/><set_value name="$s.$closed" exact="true"/><set_value name="$s.$deploymentattempted" exact="false"/>
+    <set_value name="$s.$candidates" exact="$s.$records"/><set_value name="$s.$records" exact="$selected"/><remove_value name="$s.$reviewrecords"/>
+    <set_value name="$s.$ships" exact="[]"/>
+    <do_for_each name="$e" in="$s.$template.$entries"><do_for_each name="$r" in="$s.$records"><do_if value="$r.$macro.id == $e.$macro"><set_value name="$r.$intentproven" exact="true"/><append_to_list name="$s.$ships" exact="$r"/><do_if value="$r.$state == 'DELIVERED'"><add_to_group groupname="global.$JKFOC_NPCShips" object="$r.$ship"/></do_if></do_if></do_for_each></do_for_each>
+    <set_value name="$s.$state" exact="'NPC PURCHASES APPROVED - WAITING FOR DELIVERY'"/><set_value name="$s.$revision" operation="add" exact="1"/>
+    <append_to_list name="global.$JKFOC_NPCJobs" exact="$s"/><remove_value name="global.$JKFOC_NPCCapture"/>
+    <signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$s"/>
+   </do_if>
+   <raise_lua_event name="'FOC_NPC_Purchases.request'" param="@$p.{1}"/><raise_lua_event name="'FOC_NPC_Purchases.started'" param="0"/>
+   <signal_cue_instantly cue="NPC_Snapshot" param="table[$session=if $valid then $s else null]"/>
+  </actions></cue>
+  <cue name="NPC_Snapshot" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$s" exact="event.param.$session"/>
+   <do_if value="$s and @$s.$schema == 2 and $s.$records.count le 100">
+    <raise_lua_event name="'FOC_NPC_Purchases.prepared'" param="if @$s.$prepared then 1 else 0"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.token'" param="$s.$token"/><raise_lua_event name="'FOC_NPC_Purchases.revision'" param="$s.$revision"/><raise_lua_event name="'FOC_NPC_Purchases.template'" param="$s.$template.$id"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.home'" param="$s.$homekey"/><raise_lua_event name="'FOC_NPC_Purchases.state'" param="if $s.$deploymentmessage? then $s.$state + ': ' + $s.$deploymentmessage else $s.$state"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.homename'" param="if $s.$home.exists then $s.$home.knownname else 'HOME UNAVAILABLE'"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.approved'" param="if $s.$approved then 1 else 0"/><raise_lua_event name="'FOC_NPC_Purchases.review'" param="if $s.$review? then $s.$review else -1"/><raise_lua_event name="'FOC_NPC_Purchases.overflow'" param="if $s.$overflow then 1 else 0"/>
+    <raise_lua_event name="'FOC_NPC_Purchases.expected'" param="$s.$total"/>
+    <do_for_each name="$r" in="$s.$records">
+     <raise_lua_event name="'FOC_NPC_Purchases.row'" param="$r.$id"/><raise_lua_event name="'FOC_NPC_Purchases.macro'" param="$r.$macro.id"/><raise_lua_event name="'FOC_NPC_Purchases.rowstate'" param="$r.$state"/>
+     <raise_lua_event name="'FOC_NPC_Purchases.ship'" param="if @$r.$ship.exists then $r.$ship.idcode else 'NOT DELIVERED / UNAVAILABLE'"/><raise_lua_event name="'FOC_NPC_Purchases.price'" param="$r.$price / 1Cr"/><raise_lua_event name="'FOC_NPC_Purchases.yard'" param="if $r.$yard.exists then $r.$yard.knownname else 'UNAVAILABLE'"/><raise_lua_event name="'FOC_NPC_Purchases.rowcommit'"/>
+    </do_for_each>
+    <raise_lua_event name="'FOC_NPC_Purchases.count'" param="$s.$records.count"/>
+   </do_if>
+   <do_else><raise_lua_event name="'FOC_NPC_Purchases.result'" param="'No complete current purchase record is available. A legacy capture, if present, is retained but cannot resume or be adopted. No purchase or assignment was repeated.'"/></do_else>
+   <raise_lua_event name="'FOC_NPC_Purchases.complete'"/>
+  </actions></cue>
+  <cue name="NPC_Discard" instantiate="true"><conditions><event_ui_triggered screen="'FOC_NPC_Purchases'" control="'discard'"/></conditions><actions>
+   <set_value name="$valid" exact="@event.param3.count == 2 and @global.$JKFOC_NPCCapture and not @global.$JKFOC_NPCCapture.$prepared and event.param3.{2} == global.$JKFOC_NPCCapture.$token"/>
+   <do_if value="$valid"><remove_value name="global.$JKFOC_NPCCapture"/></do_if>
+   <raise_lua_event name="'FOC_NPC_Purchases.request'" param="@event.param3.{1}"/>
+   <raise_lua_event name="'FOC_NPC_Purchases.discarded'" param="if $valid then 1 else 0"/>
+   <raise_lua_event name="'FOC_NPC_Purchases.result'" param="if $valid then 'Unapproved capture tracking removed. Native purchases, ships and money were not changed. Approved jobs remain available.' else 'Tracking was not removed. Check retained purchases again.'"/>
+   <raise_lua_event name="'FOC_NPC_Purchases.complete'"/>
+  </actions></cue>
+ </cues>
+</mdscript>

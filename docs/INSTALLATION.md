@@ -11,7 +11,7 @@
 ## Manual installation
 
 1. Close X4: Foundations normally.
-2. Download [`FOC_v155.zip`](../dist/FOC_v155.zip).
+2. Download [`FOC_v171.zip`](../dist/FOC_v171.zip).
 3. Extract the archive.
 4. Copy the contained lowercase `jk_foc` folder into the X4 `extensions` directory.
 
@@ -36,10 +36,10 @@ Unsubscribe from the Workshop item or, for a manual installation, close X4 and r
 
 ## Verifying the archive
 
-The v1.55 archive SHA-256 is:
+The v1.71 archive SHA-256 is:
 
 ```text
-858B09B07CA483DF3AF861257267B77BF47566DC3FF184A098F8DDFC62F82AE2
+143B2F94CB031EC86089F89416218E536F9AABD1D548EDD013ECA145902E866D
 ```
 
 
@@ -47,4 +47,8 @@ The v1.55 archive SHA-256 is:
 
 After installing the complete v1.54 package with X4 closed, load your game and choose the intended carrier in **Fleets -> Strategic Ops -> Carrier Air Wings**. Check **Saved wing** for the exact carrier/group profile. A dropdown change alone is not a saved setting. Use Apply deliberately, check readback, and save the game normally.
 
-The archive link and checksum above identify the v1.55 distribution.
+The archive link and checksum above identify the v1.71 distribution. The browser [player guide](PLAYER_GUIDE.md) is current for B072; older versioned PDFs remain historical references.
+
+## Existing fleet purchases
+
+Updating the mod does not require buying ships again. If a retained purchase needs assembly, use **Strategic Ops -> Coverage and Fleet Templates -> Open Saved Fleet Templates -> Check Prepared Fleet Order**, then review the available no-charge recovery. Follow the [purchasing and recovery walkthrough](PLAYER_GUIDE.md#8f-coverage-and-fleet-templates---plan-buy-and-recover). Preserve your save normally after a successful recovery.

@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Construction" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="Construction_Ensure" instantiate="true" namespace="this">
+   <conditions><event_cue_signalled/></conditions>
+   <actions>
+    <do_if value="not global.$JKFOC_ConstructionJobs?"><set_value name="global.$JKFOC_ConstructionJobs" exact="[]"/></do_if>
+    <do_if value="not global.$JKFOC_ConstructionNext?"><set_value name="global.$JKFOC_ConstructionNext" exact="1"/></do_if>
+    <do_if value="not global.$JKFOC_ConstructionYards?"><create_group groupname="global.$JKFOC_ConstructionYards"/></do_if>
+    <do_if value="not global.$JKFOC_ConstructionShips?"><create_group groupname="global.$JKFOC_ConstructionShips"/></do_if>
+   </actions>
+  </cue>
+  <cue name="Construction_Init"><actions><signal_cue_instantly cue="Construction_Ensure"/></actions>
+   <cues>
+    <cue name="Construction_Finished" instantiate="true" namespace="this">
+     <conditions><event_build_finished group="global.$JKFOC_ConstructionYards"/></conditions>
+     <actions>
+      <do_for_each name="$job" in="global.$JKFOC_ConstructionJobs">
+       <do_for_each name="$entry" in="$job.$ships">
+        <do_if value="@$entry.$task == event.param3 and $entry.$state == 'QUEUED'">
+         <set_value name="$ship" exact="@event.param3.buildobject"/>
+         <do_if value="$ship and $ship.exists and $ship.isoperational and $ship.owner == faction.player and $ship.macro == $entry.$macro">
+          <set_value name="$entry.$ship" exact="$ship"/><set_value name="$entry.$state" exact="'DELIVERED'"/>
+          <set_value name="$entry.$oldorder" exact="@$ship.order"/><set_value name="$entry.$olddefault" exact="@$ship.defaultorder"/>
+          <add_to_group groupname="global.$JKFOC_ConstructionShips" object="$ship"/>
+         </do_if>
+         <do_else><set_value name="$entry.$state" exact="'DELIVERY UNCONFIRMED'"/></do_else>
+         <signal_cue_instantly cue="Construction_Report" param="$job"/>
+         <signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$job"/>
+        </do_if>
+       </do_for_each>
+      </do_for_each>
+     </actions>
+    </cue>
+    <cue name="Construction_Captain" instantiate="true" namespace="this">
+     <conditions><event_control_entity_added group="global.$JKFOC_ConstructionShips"/></conditions>
+     <actions><do_for_each name="$job" in="global.$JKFOC_ConstructionJobs"><do_for_each name="$entry" in="$job.$ships">
+      <do_if value="@$entry.$ship == event.object and not @$job.$deploymentattempted"><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$job"/></do_if>
+     </do_for_each></do_for_each></actions>
+    </cue>
+    <cue name="Construction_Cancelled" instantiate="true" namespace="this">
+     <conditions><event_build_cancelled group="global.$JKFOC_ConstructionYards"/></conditions>
+     <actions><do_for_each name="$job" in="global.$JKFOC_ConstructionJobs"><do_for_each name="$entry" in="$job.$ships">
+      <do_if value="@$entry.$task == event.param and $entry.$state == 'QUEUED'"><set_value name="$entry.$state" exact="'CANCELLED'"/><signal_cue_instantly cue="Construction_Report" param="$job"/></do_if>
+     </do_for_each></do_for_each></actions>
+    </cue>
+   </cues>
+  </cue>
+  <cue name="Construction_Load" instantiate="true">
+   <conditions><event_game_loaded/></conditions>
+   <actions><signal_cue_instantly cue="Construction_Ensure"/><remove_value name="global.$JKFOC_ConstructionPreview"/>
+    <do_for_each name="$job" in="global.$JKFOC_ConstructionJobs"><do_if value="$job.$deploymentattempted? and not $job.$deploymentattempted"><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$job"/></do_if></do_for_each>
+   </actions>
+  </cue>
+  <cue name="Construction_Prepare" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Construction'" control="'prepare'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="Construction_Ensure"/><signal_cue_instantly cue="md.FOC_Advisor.Advisor_Ensure"/>
+    <remove_value name="global.$JKFOC_ConstructionPreview"/>
+    <set_value name="$p" exact="event.param3"/><set_value name="$template" exact="null"/><set_value name="$home" exact="null"/>
+    <set_value name="$reason" exact="'Saved fleet or Home unavailable. Reload the template, choose Home and save it again.'"/>
+    <set_value name="$valid" exact="@$p.count == 4 and global.$JKFOC_ConstructionJobs.count lt 20"/>
+    <do_if value="$valid">
+     <set_value name="$home" exact="@component.{$p.{3}}"/>
+     <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates"><do_if value="$t.$id == $p.{2}"><set_value name="$template" exact="$t"/></do_if></do_for_each>
+     <set_value name="$valid" exact="$template and $home and $home.exists and $home.isclass.sector"/>
+     <do_if value="$valid"><set_value name="$valid" exact="@$template.$home.exists and $template.$home == $home"/></do_if>
+    </do_if>
+    <set_value name="$entries" exact="[]"/><set_value name="$total" exact="0"/><set_value name="$examined" exact="0"/>
+    <do_if value="$valid">
+     <set_value name="$valid" exact="$template.$entries.count ge 1 and $template.$entries.count le 8"/>
+     <find_station_by_true_owner name="$yards" faction="faction.player" space="player.galaxy" canbuildships="true" canbuildfor="faction.player" hascontrolentity="controlpost.shiptrader" multiple="true"/>
+     <set_value name="$reason" exact="'Fleet entries or yard scan exceed the supported bounds.'"/>
+     <do_if value="$yards.count == 0"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'No player-owned shipbuilding yard with a ship trader was found. Review the saved fleet and use its NPC purchase option.'"/></do_if>
+     <do_if value="$yards.count gt 128"><set_value name="$valid" exact="false"/></do_if>
+     <do_if value="$valid">
+      <do_for_each name="$e" in="$template.$entries">
+       <set_value name="$total" operation="add" exact="$e.$amount"/>
+       <do_if value="$e.$amount lt 1 or $e.$amount gt 100 or $e.$amount != ($e.$amount)i or $total gt 100"><set_value name="$valid" exact="false"/></do_if>
+       <set_value name="$best" exact="null"/><set_value name="$distance" exact="999999"/>
+       <set_value name="$seenhull" exact="false"/><set_value name="$blueprint" exact="false"/><set_value name="$compatible" exact="false"/><set_value name="$reachable" exact="false"/><set_value name="$loadoutok" exact="false"/>
+       <do_if value="$valid">
+        <do_for_each name="$yard" in="$yards">
+         <do_if value="$valid and $yard.isoperational and $yard.buildmodules.count le 32">
+          <do_for_each name="$module" in="$yard.buildmodules">
+           <do_if value="$valid and $module.buildmacros.count le 2048 and $examined + $module.buildmacros.count le 8192">
+            <set_value name="$examined" operation="add" exact="$module.buildmacros.count"/>
+            <do_for_each name="$macro" in="$module.buildmacros">
+             <do_if value="$macro.id == $e.$macro">
+              <set_value name="$seenhull" exact="true"/>
+              <do_if value="player.blueprints.{$macro.ware}.any.exists"><set_value name="$blueprint" exact="true"/></do_if>
+             </do_if>
+             <do_if value="$macro.id == $e.$macro and $macro.primarypurpose == purpose.fight and player.blueprints.{$macro.ware}.any.exists and $yard.canbuildmacro.{$macro}">
+              <set_value name="$compatible" exact="true"/>
+              <set_value name="$d" exact="$yard.gatedistance.{$home}"/>
+              <do_if value="$d ge 0 and $d lt $distance">
+               <set_value name="$reachable" exact="true"/>
+               <remove_value name="$loads"/><generate_loadout macro="$macro" faction="faction.player" level="0.5" variation="0" requireblueprints="true" result="$loads"/>
+               <do_if value="@$loads.count == 1 and $loads.{1}.wares.list.count gt 0">
+                <set_value name="$loadoutok" exact="true"/>
+                <set_value name="$missing" exact="$yard.missingloadoutequipment.{$loads.{1}}.{faction.player}.list"/>
+                <do_if value="$missing.count == 0"><set_value name="$best" exact="table[$yard=$yard,$macro=$macro,$loadout=$loads.{1},$amount=$e.$amount]"/><set_value name="$distance" exact="$d"/></do_if>
+               </do_if>
+              </do_if>
+             </do_if>
+            </do_for_each>
+           </do_if>
+           <do_else><set_value name="$valid" exact="false"/></do_else>
+          </do_for_each>
+         </do_if>
+         <do_elseif value="$yard.buildmodules.count gt 32"><set_value name="$valid" exact="false"/></do_elseif>
+        </do_for_each>
+       </do_if>
+       <do_if value="$best"><append_to_list name="$entries" exact="$best"/></do_if>
+       <do_elseif value="$valid">
+        <set_value name="$reason" exact="'%1: %2'.[$e.$macro,if not $seenhull then 'No operational owned yard offers this hull. Review its NPC supplier.' else if not $blueprint then 'Ship blueprint is not owned. Buy the blueprint in X4 or review an NPC supplier.' else if not $compatible then 'Owned yard cannot currently build this combat hull.' else if not $reachable then 'No eligible yard has a known gate route to Home.' else if not $loadoutok then 'No owned-blueprint medium equipment preset could be generated.' else 'Required preset equipment is unavailable at the eligible yards.']"/>
+        <set_value name="$valid" exact="false"/>
+       </do_elseif>
+      </do_for_each>
+     </do_if>
+    </do_if>
+    <raise_lua_event name="'FOC_Construction.request'" param="@$p.{1}"/>
+    <raise_lua_event name="'FOC_Construction.job'" param="0"/>
+    <do_if value="$valid and $entries.count == $template.$entries.count">
+     <set_value name="global.$JKFOC_ConstructionPreview" exact="table[$token=global.$JKFOC_ConstructionNext,$template=$template,$home=$home,$homekey=$p.{4},$entries=$entries,$total=$total,$time=player.age]"/>
+     <set_value name="global.$JKFOC_ConstructionNext" operation="add" exact="1"/>
+     <raise_lua_event name="'FOC_Construction.token'" param="global.$JKFOC_ConstructionPreview.$token"/>
+     <raise_lua_event name="'FOC_Construction.result'" param="'%1: build %2 ships with owned-blueprint medium loadouts and normal resources. First listed hull leads; others defend it. Assemble and patrol Home: %3 after delivery. Nothing ordered yet.'.[$template.$name,$total,$home.knownname]"/>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Construction.token'" param="0"/><raise_lua_event name="'FOC_Construction.result'" param="(if global.$JKFOC_ConstructionJobs.count ge 20 then 'Construction tracking is full (20 jobs).' else $reason) + ' Nothing ordered.'"/></do_else>
+    <raise_lua_event name="'FOC_Construction.complete'"/>
+   </actions>
+  </cue>
+  <cue name="Construction_Commit" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Construction'" control="'commit'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="Construction_Ensure"/>
+    <set_value name="$p" exact="event.param3"/>
+    <raise_lua_event name="'FOC_Construction.request'" param="@$p.{1}"/>
+    <set_value name="$plan" exact="@global.$JKFOC_ConstructionPreview"/>
+    <set_value name="$valid" exact="@$p.count == 2 and $plan and @$plan.$token == $p.{2} and global.$JKFOC_ConstructionJobs.count lt 20 and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
+    <do_if value="$valid">
+     <set_value name="$valid" exact="player.age ge $plan.$time and player.age - $plan.$time le 120s and $plan.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$plan.$template}"/>
+     <do_for_each name="$job" in="global.$JKFOC_ConstructionJobs"><do_if value="$job.$template == $plan.$template"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+     <do_for_each name="$e" in="$plan.$entries">
+      <do_if value="not $e.$yard.exists or not $e.$yard.isoperational or $e.$yard.owner != faction.player or not $e.$yard.canbuildmacro.{$e.$macro} or not player.blueprints.{$e.$macro.ware}.any.exists"><set_value name="$valid" exact="false"/></do_if>
+      <do_elseif value="$e.$yard.missingloadoutequipment.{$e.$loadout}.{faction.player}.list.count gt 0"><set_value name="$valid" exact="false"/></do_elseif>
+     </do_for_each>
+    </do_if>
+    <!-- Consume before creating any task. Failure never retries or refunds automatically. -->
+    <do_if value="$plan and @$plan.$token == @$p.{2}"><remove_value name="global.$JKFOC_ConstructionPreview"/></do_if>
+    <do_if value="$valid">
+     <set_value name="$job" exact="table[$token=$plan.$token,$template=$plan.$template,$home=$plan.$home,$homekey=$plan.$homekey,$total=$plan.$total,$ships=[],$state='SUBMITTING',$time=player.age,$deploymentattempted=false]"/>
+     <append_to_list name="global.$JKFOC_ConstructionJobs" exact="$job"/><set_value name="$failed" exact="false"/>
+     <do_for_each name="$e" in="$plan.$entries">
+      <add_to_group groupname="global.$JKFOC_ConstructionYards" object="$e.$yard"/>
+      <do_all exact="$e.$amount">
+       <do_if value="not $failed">
+        <remove_value name="$task"/>
+        <add_build_to_construct_ship object="$e.$yard" macro="$e.$macro" loadout="$e.$loadout" faction="faction.player" result="$task"/>
+        <do_if value="@$task.exists"><append_to_list name="$job.$ships" exact="table[$task=$task,$macro=$e.$macro,$yard=$e.$yard,$state='QUEUED']"/></do_if>
+        <do_else><set_value name="$failed" exact="true"/></do_else>
+       </do_if>
+      </do_all>
+     </do_for_each>
+     <set_value name="$job.$state" exact="if $failed then 'PARTIAL SUBMISSION' else 'CONSTRUCTING'"/>
+     <signal_cue_instantly cue="Construction_Report" param="$job"/>
+     <raise_lua_event name="'FOC_Construction.job'" param="$job.$token"/>
+     <raise_lua_event name="'FOC_Construction.result'" param="$job.$message"/>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Construction.job'" param="0"/><raise_lua_event name="'FOC_Construction.result'" param="'Build approval expired, changed, already used, or blocked by current settings. No new construction submitted.'"/></do_else>
+    <raise_lua_event name="'FOC_Construction.token'" param="0"/><raise_lua_event name="'FOC_Construction.complete'"/>
+   </actions>
+  </cue>
+  <cue name="Construction_Status" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Construction'" control="'status'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="Construction_Ensure"/><set_value name="$p" exact="event.param3"/><set_value name="$job" exact="null"/>
+    <do_if value="@$p.count == 2 and global.$JKFOC_ConstructionJobs.count le 20">
+     <do_for_each name="$j" in="global.$JKFOC_ConstructionJobs"><do_if value="$p.{2} == 0 or $p.{2} == $j.$token"><set_value name="$job" exact="$j"/></do_if></do_for_each>
+    </do_if>
+    <raise_lua_event name="'FOC_Construction.request'" param="@$p.{1}"/><raise_lua_event name="'FOC_Construction.token'" param="0"/>
+    <do_if value="$job">
+     <do_for_each name="$e" in="$job.$ships">
+      <do_if value="$e.$state == 'DELIVERED' and (not @$e.$ship.exists or $e.$ship.owner != faction.player)"><set_value name="$e.$state" exact="'DELIVERED SHIP UNAVAILABLE'"/></do_if>
+      <do_elseif value="$e.$state == 'QUEUED' and not @$e.$task.exists"><set_value name="$e.$state" exact="'TASK OUTCOME UNCONFIRMED'"/></do_elseif>
+     </do_for_each>
+     <signal_cue_instantly cue="Construction_Report" param="$job"/>
+     <raise_lua_event name="'FOC_Construction.job'" param="$job.$token"/><raise_lua_event name="'FOC_Construction.result'" param="$job.$message"/>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Construction.job'" param="0"/><raise_lua_event name="'FOC_Construction.result'" param="'No matching FOC construction job. Nothing submitted.'"/></do_else>
+    <raise_lua_event name="'FOC_Construction.complete'"/>
+   </actions>
+  </cue>
+  <cue name="Construction_Report" instantiate="true" namespace="this">
+   <conditions><event_cue_signalled/></conditions>
+   <actions>
+    <set_value name="$job" exact="event.param"/><set_value name="$delivered" exact="0"/>
+    <do_for_each name="$e" in="$job.$ships"><do_if value="$e.$state == 'DELIVERED' and @$e.$ship.exists and $e.$ship.owner == faction.player"><set_value name="$delivered" operation="add" exact="1"/></do_if></do_for_each>
+    <set_value name="$job.$delivered" exact="$delivered"/>
+    <do_if value="$delivered == $job.$total and not @$job.$deploymentattempted"><set_value name="$job.$state" exact="'DELIVERED'"/></do_if>
+    <do_elseif value="$job.$state == 'DELIVERED'"><set_value name="$job.$state" exact="'DELIVERED SHIP UNAVAILABLE'"/></do_elseif>
+    <set_value name="$job.$message" exact="'%1: %2 of %3 ships delivered; %4 native tasks submitted. Status: %5. %6'.[$job.$template.$name,$delivered,$job.$total,$job.$ships.count,$job.$state,if $job.$deploymentmessage? then $job.$deploymentmessage else 'Waiting for complete delivery and native captains.']"/>
+    <raise_lua_event name="'FOC_Construction.activity'" param="$job.$message"/>
+   </actions>
+  </cue>
+ </cues>
+</mdscript>

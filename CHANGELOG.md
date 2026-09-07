@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.71 — Build 072
+
+- Added Coverage and Fleet Templates: save fleet composition and Home, review NPC suppliers and equipment, and confirm the whole-fleet purchase price once.
+- Added separate player-yard construction preview and retained NPC purchase/delivery review.
+- Improved existing-purchase readback across reload and no-charge recovery of already purchased ships into their fleet.
+- Recovery can reconcile missing order history for explicitly reviewed idle Hold Position ships with empty queues. Both recovery and delayed assembly preserve changed player orders and assignments.
+- Delivery, recovery approval, assembly, patrol submission, and arrival are distinct reported stages; status checks do not repeat purchases.
+- Includes independent, default-off combat repair/return and transport emergency docking settings. NPC repair can spend credits; interrupted repair reload behavior is documented separately from purchase recovery.
+- Updated the complete browser player guide with B072 recovery, native hierarchy, patrol, and reload screenshots. Updated installation, quick start, and archive checksums; older releases and PDF guides remain available.
+
 ## v1.55 — Build 056
 
 - NEW: Session History pages the retained operational archive, including yellow distress and red damage events.

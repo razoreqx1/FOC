@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Advisor" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="Advisor_Ensure" instantiate="true" namespace="this">
+   <conditions><event_cue_signalled/></conditions>
+   <actions>
+    <do_if value="not global.$JKFOC_AdvisorTemplates?"><set_value name="global.$JKFOC_AdvisorTemplates" exact="[]"/></do_if>
+    <do_if value="not global.$JKFOC_AdvisorNext?"><set_value name="global.$JKFOC_AdvisorNext" exact="1"/></do_if>
+   </actions>
+  </cue>
+  <cue name="Advisor_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions><signal_cue_instantly cue="Advisor_Ensure"/></actions></cue>
+  <cue name="Advisor_Request" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'refresh'"/></conditions><actions><signal_cue_instantly cue="Advisor_Snapshot" param="event.param3"/></actions></cue>
+  <cue name="Advisor_Snapshot" instantiate="true" namespace="this">
+   <conditions><event_cue_signalled/></conditions>
+   <actions>
+    <signal_cue_instantly cue="Advisor_Ensure"/>
+    <find_station name="$yards" space="player.galaxy" hascontrolentity="controlpost.shiptrader" functional="true" canbuildfor="faction.player" knownto="faction.player" multiple="true"/>
+    <find_station_by_true_owner name="$owned" space="player.galaxy" faction="faction.player" hascontrolentity="controlpost.shiptrader" multiple="true"/>
+    <find_sector name="$homes" knownto="faction.player" multiple="true"/>
+    <do_for_each name="$yard" in="$owned"><do_if value="$yard.isoperational and not $yards.indexof.{$yard}"><append_to_list name="$yards" exact="$yard"/></do_if></do_for_each>
+    <do_if value="$yards.count gt 128 or $homes.count gt 512 or global.$JKFOC_AdvisorTemplates.count gt 20 or @global.$JKFOC_StrategicObservations.count gt 300"><raise_lua_event name="'FOC_Advisor.failure'" param="'Analysis exceeds its bound. No partial coverage claim produced.'"/></do_if>
+    <do_else>
+     <raise_lua_event name="'FOC_Advisor.begin'" param="event.param"/>
+     <raise_lua_event name="'FOC_Advisor.clock'" param="player.age"/>
+     <set_value name="$count" exact="0"/>
+     <do_for_each name="$home" in="$homes">
+      <raise_lua_event name="'FOC_Advisor.row'" param="'home'"/><raise_lua_event name="'FOC_Advisor.id'" param="$home"/><raise_lua_event name="'FOC_Advisor.name'" param="$home.knownname"/><raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/>
+     </do_for_each>
+     <do_if value="global.$JKFOC_StrategicObservations?">
+      <do_for_each name="$o" in="global.$JKFOC_StrategicObservations">
+       <do_if value="@$o.$kind == 'TRADE_RISK' and $o.$sector? and $o.$sector.exists and $o.$time? and player.age ge $o.$time and player.age - $o.$time le 1h">
+        <raise_lua_event name="'FOC_Advisor.row'" param="'observation'"/>
+        <raise_lua_event name="'FOC_Advisor.sector'" param="$o.$sector"/>
+        <raise_lua_event name="'FOC_Advisor.sectorname'" param="$o.$sector.knownname"/>
+        <raise_lua_event name="'FOC_Advisor.time'" param="$o.$time"/>
+        <raise_lua_event name="'FOC_Advisor.attackerclass'" param="if $o.$attackerclass? then $o.$attackerclass else 'UNKNOWN'"/>
+        <raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/>
+       </do_if>
+      </do_for_each>
+     </do_if>
+     <do_for_each name="$yard" in="$yards">
+      <raise_lua_event name="'FOC_Advisor.row'" param="'yard'"/><raise_lua_event name="'FOC_Advisor.id'" param="$yard"/><raise_lua_event name="'FOC_Advisor.name'" param="$yard.knownname"/><raise_lua_event name="'FOC_Advisor.owned'" param="if $yard.owner == faction.player then 1 else 0"/><raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/>
+     </do_for_each>
+     <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates">
+      <raise_lua_event name="'FOC_Advisor.row'" param="'template'"/><raise_lua_event name="'FOC_Advisor.id'" param="$t.$id"/><raise_lua_event name="'FOC_Advisor.name'" param="$t.$name"/>
+      <raise_lua_event name="'FOC_Advisor.home'" param="if @$t.$home.exists then $t.$home else 0"/><raise_lua_event name="'FOC_Advisor.homename'" param="if @$t.$home.exists then $t.$home.knownname else 'CHOOSE HOME'"/>
+      <raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/>
+      <do_for_each name="$e" in="$t.$entries"><raise_lua_event name="'FOC_Advisor.row'" param="'entry'"/><raise_lua_event name="'FOC_Advisor.parent'" param="$t.$id"/><raise_lua_event name="'FOC_Advisor.macro'" param="$e.$macro"/><raise_lua_event name="'FOC_Advisor.amount'" param="$e.$amount"/><raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/></do_for_each>
+     </do_for_each>
+     <raise_lua_event name="'FOC_Advisor.expected'" param="$count"/><raise_lua_event name="'FOC_Advisor.complete'"/>
+    </do_else>
+   </actions>
+  </cue>
+  <cue name="Advisor_Save" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'save'"/></conditions><actions><signal_cue_instantly cue="Advisor_SaveRecord" param="[event.param3,false]"/></actions></cue>
+  <cue name="Advisor_SaveHome" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'save_v2'"/></conditions><actions><signal_cue_instantly cue="Advisor_SaveRecord" param="[event.param3,true]"/></actions></cue>
+  <cue name="Advisor_SaveRecord" instantiate="true" namespace="this">
+   <conditions><event_cue_signalled/></conditions>
+   <actions>
+    <signal_cue_instantly cue="Advisor_Ensure"/><set_value name="$p" exact="event.param.{1}"/><set_value name="$withhome" exact="event.param.{2}"/>
+    <set_value name="$count" exact="$p.count - (if $withhome then 1 else 0)"/><set_value name="$home" exact="null"/>
+    <set_value name="$reason" exact="'Template packet must contain one to eight complete ship entries.'"/>
+    <set_value name="$valid" exact="$count ge 4 and $count le 18 and $count % 2 == 0 and global.$JKFOC_AdvisorTemplates.count le 20"/>
+    <do_if value="$valid and $withhome"><set_value name="$home" exact="@component.{$p.{$p.count}}"/><set_value name="$valid" exact="$home and @$home.exists and @$home.isclass.sector"/><do_if value="not $valid"><set_value name="$reason" exact="'Home sector could not be resolved. Choose Home again; your draft is retained.'"/></do_if></do_if>
+    <set_value name="$slot" exact="0"/><set_value name="$prior" exact="null"/>
+    <do_all exact="20" counter="$i"><do_if value="$p.{2} == 'Response Fleet %1'.[$i]"><set_value name="$slot" exact="$i"/></do_if></do_all>
+    <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates"><do_if value="$t.$name == $p.{2}"><set_value name="$prior" exact="$t"/></do_if></do_for_each>
+    <do_if value="$slot == 0"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'Choose a numbered Response Fleet template slot.'"/></do_if>
+    <do_elseif value="not $prior and global.$JKFOC_AdvisorTemplates.count ge 20"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'All 20 composition slots are occupied. Select an existing saved template to replace.'"/></do_elseif>
+    <set_value name="$entries" exact="[]"/><set_value name="$total" exact="0"/>
+    <do_if value="$valid">
+     <do_all exact="($count - 2) / 2" counter="$i">
+      <set_value name="$macro" exact="$p.{2 * $i + 1}"/><set_value name="$amount" exact="$p.{2 * $i + 2}"/>
+      <do_if value="$amount lt 1 or $amount gt 100 or $amount != ($amount)i or not $macro"><set_value name="$valid" exact="false"/></do_if>
+      <set_value name="$total" operation="add" exact="$amount"/><append_to_list name="$entries" exact="table[$macro=$macro, $amount=$amount]"/>
+     </do_all>
+     <do_if value="$valid and $total le 100">
+      <do_if value="$prior"><remove_from_list name="global.$JKFOC_AdvisorTemplates" exact="$prior" multiple="false"/></do_if>
+      <append_to_list name="global.$JKFOC_AdvisorTemplates" exact="table[$schema=2, $id=global.$JKFOC_AdvisorNext, $name=$p.{2}, $entries=$entries, $home=$home]"/>
+      <set_value name="global.$JKFOC_AdvisorNext" operation="add" exact="1"/><signal_cue_instantly cue="Advisor_Snapshot" param="$p.{1}"/>
+     </do_if>
+     <do_else><raise_lua_event name="'FOC_Advisor.failure'" param="'Template rejected: whole quantities and at most 100 ships required.'"/><raise_lua_event name="'FOC_Advisor.save_rejected'" param="$p.{1}"/></do_else>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Advisor.failure'" param="$reason"/><raise_lua_event name="'FOC_Advisor.save_rejected'" param="$p.{1}"/></do_else>
+   </actions>
+  </cue>
+  <cue name="Advisor_Coverage" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Advisor'" control="'coverage'"/></conditions>
+   <actions>
+    <set_value name="$sector" exact="@component.{event.param3}"/><set_value name="$best" exact="null"/><set_value name="$distance" exact="999999"/>
+    <raise_lua_event name="'FOC_Advisor.coveragesector'" param="$sector"/>
+    <do_if value="$sector? and $sector.exists and $sector.isclass.sector and global.$JKFOC_FleetDrafts? and global.$JKFOC_FleetDrafts.count le 128 and global.$JKFOC_OperationsPolicy? and global.$JKFOC_ProtectedShipIDs? and global.$JKFOC_StoryShipOverrides? and global.$JKFOC_ResponseLocks? and global.$JKFOC_ResponseLocks.count le 128 and global.$JKFOC_RecoveryJobs? and global.$JKFOC_RecoveryJobs.count le 128">
+     <do_for_each name="$draft" in="global.$JKFOC_FleetDrafts">
+      <set_value name="$ship" exact="@$draft.$commander"/><set_value name="$locked" exact="false"/>
+      <do_if value="global.$JKFOC_ResponseLocks?"><do_for_each name="$lock" in="global.$JKFOC_ResponseLocks"><do_if value="@$lock.$commander == $ship"><set_value name="$locked" exact="true"/></do_if></do_for_each></do_if>
+      <do_if value="global.$JKFOC_RecoveryJobs?"><do_for_each name="$job" in="global.$JKFOC_RecoveryJobs"><do_if value="@$job.$ship == $ship"><set_value name="$locked" exact="true"/></do_if></do_for_each></do_if>
+      <do_if value="$ship and $ship.exists and $ship.owner == faction.player and $ship.primarypurpose == purpose.fight and $ship.allsubordinates.count ge 3 and $ship.allsubordinates.count lt 100 and not $locked and @$ship.order.exists and @$ship.defaultorder.exists and $ship.order == $ship.defaultorder and ['Patrol','ProtectPosition'].indexof.{$ship.defaultorder.id}">
+       <set_value name="$check" exact="table[$ship=$ship,$draft=$draft,$id=$draft.$commanderidcode,$home=$sector]"/>
+       <signal_cue_instantly cue="md.FOC_Plan.Plan_Check" param="$check"/>
+       <do_if value="$check.$reason == 'READY'"><set_value name="$d" exact="$ship.gatedistance.{$sector}"/><do_if value="$d ge 0 and $d lt $distance"><set_value name="$best" exact="$ship"/><set_value name="$distance" exact="$d"/></do_if></do_if>
+      </do_if>
+     </do_for_each>
+     <raise_lua_event name="'FOC_Advisor.coverage'" param="if $best and $distance le 2 then 'NO extra fleet for the placement target | %1 [%2], %3 gate(s) away. Ready patrol/guard fleet, at least four ships. Combat strength and response rules still matter.'.[$best.knownname,$best.idcode,$distance] else if $best then 'YES - add or relocate a fleet here | Nearest ready patrol/guard: %1 [%2], %3 gates away; target is two gates. Suggested Home: %4.'.[$best.knownname,$best.idcode,$distance,$sector.knownname] else 'YES - add or relocate a fleet here | No ready enrolled patrol/guard fleet with at least four ships found. Suggested Home: %1. Existing ships may need attention rather than replacement.'.[$sector.knownname]"/>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Advisor.coverage'" param="'Coverage unavailable: incomplete or oversized fleet evidence. No recommendation made.'"/></do_else>
+   </actions>
+  </cue>
+ </cues>
+</mdscript>

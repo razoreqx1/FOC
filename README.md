@@ -7,28 +7,30 @@
 Fleet Operations Command (FOC) is a player-first fleet readiness, patrol, recovery, training, and distress-response console for **X4: Foundations**. It turns large-empire fleet management into clear, bounded decisions while keeping the player in command.
 
 [![Steam Workshop](https://img.shields.io/badge/Steam-Workshop-1b2838?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
-![Release](https://img.shields.io/badge/release-v1.55-blue)
+![Release](https://img.shields.io/badge/release-v1.71-blue)
 ![Game](https://img.shields.io/badge/game-X4%3A%20Foundations-orange)
 
 ## Current release
 
-- Public version: **1.55**
-- Governed runtime identity: **Build 056 / extension version 155**
-- Release archive: [`dist/FOC_v155.zip`](dist/FOC_v155.zip)
-- Release SHA-256: `858B09B07CA483DF3AF861257267B77BF47566DC3FF184A098F8DDFC62F82AE2`
+- Public version: **1.71**
+- Governed runtime identity: **Build 072 / extension version 171**
+- Release archive: [`dist/FOC_v171.zip`](dist/FOC_v171.zip)
+- Release SHA-256: `143B2F94CB031EC86089F89416218E536F9AABD1D548EDD013ECA145902E866D`
 - Previous v1.54 PDF guide: [`docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf)
 - Browser-readable player guide: [`docs/PLAYER_GUIDE.md`](docs/PLAYER_GUIDE.md)
 - Steam Workshop: [Fleet Operations Command](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
 
-This repository contains the exact eight runtime files from Build 056. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
+This repository contains the exact 21 runtime files from Build 072. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
 
-## v1.55 documentation
+## v1.71 documentation
 
-The [updated player guide](docs/PLAYER_GUIDE.md) covers Build 056's Strategic Ops workspaces and saved carrier settings. The current release archive and source below contain the matching Build 056 runtime.
+The [updated player guide](docs/PLAYER_GUIDE.md) includes fleet planning, NPC purchasing, no-charge recovery of retained ships, assembly, Home patrol, and save/reload guidance with genuine B072 screenshots. Older PDF guides and downloads remain available as historical versions. The current archive and source contain the matching Build 072 runtime.
 
-## New in v1.55
+## New in v1.71
 
-Session History now shows retained operational alerts, including yellow distress and red damage events, with refresh-aware paging and native-map buttons for new distress records carrying exact target information. See the [updated browser guide](docs/PLAYER_GUIDE.md). Automatic Repair and Return is not included.
+Plan a fleet and Home through **Coverage and Fleet Templates**, inspect the whole NPC purchase quote, and track native construction separately from fleet assembly. Retained purchases can be reviewed and explicitly recovered into a fleet without another purchase or charge. Recovery checks both the reviewed state and the delayed assembly state so newer player orders and assignments remain protected. Clear status distinguishes delivered ships, pending assembly, and Home patrol submission.
+
+The release also includes independent **Combat repair and return** and **Transport emergency docking** opt-ins in Settings. Both default off; NPC repair may spend credits. See the [player guide](docs/PLAYER_GUIDE.md) for authority, waiting, and reload behavior.
 
 ## Features
 
@@ -37,6 +39,8 @@ Session History now shows retained operational alerts, including yellow distress
 - **Carrier saved-profile clarity** — exact carrier/group settings, separate saved and draft values, and direct inspection through the live X4 map.
 - **Named task forces** — group save-backed fleet identities into active/reserve defense teams without changing X4's native fleet hierarchy.
 - **Plans, templates, and presets** — save fleet drafts, reuse plans, and preview every consequential action before sending orders.
+- **Fleet composition and purchasing** — save a Home and hull plan, inspect suppliers and equipment, approve a whole-fleet quote, and track delivery and assembly.
+- **Retained-purchase recovery** — review exact existing ships and confirm no-charge assembly without buying them again.
 - **Structural fleet discovery** — finds eligible combat fleets from X4's live commander hierarchy instead of names, old markers, or a partial faction-ship sample.
 - **Alphabetical fleet finder** — narrows large fleet lists without changing the underlying structural discovery rules.
 - **Focused patrol controls** — choose Home, distress-response range, distress classes, urgency, hull thresholds, and return behavior.
@@ -69,7 +73,7 @@ Subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedet
 ### Manual installation
 
 1. Close X4: Foundations.
-2. Download [`FOC_v155.zip`](dist/FOC_v155.zip).
+2. Download [`FOC_v171.zip`](dist/FOC_v171.zip).
 3. Extract the lowercase `jk_foc` folder into the game's `extensions` directory.
 4. Confirm the final path ends with `X4 Foundations/extensions/jk_foc/content.xml`.
 5. Start X4 and enable Fleet Operations Command if needed.

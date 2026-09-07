@@ -8,7 +8,7 @@ FOC contains ten focused pages:
 
 1. **Command** — global authority modes and emergency controls.
 2. **Fleets** — Home, patrol, distress, and selected-fleet deployment.
-3. **Strategic Ops** — Task Forces, Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
+3. **Strategic Ops** — Coverage and Fleet Templates, Task Forces, Carrier Air Wings, Sector Defense Grid, Convoy Escort, Mobile Logistics, and Coordinated Assault.
 4. **Readiness** — captain coverage, proven vacancies, and staffing previews.
 5. **Training Academy** — trainees, seminars, and exact assignments.
 6. **Academy Store** — approved training-supply purchases and verified inventory results.
@@ -50,7 +50,7 @@ No colored route means no qualifying observation inside the active window. It ne
 ## Understand results
 
 - **Unknown** — the required evidence is absent or incomplete.
-- **Blocked / Action Required** — a safety guard stopped the action; nothing changed.
+- **Blocked / Action Required** — a safety guard stopped the requested step; earlier orders or completed parts may still exist. Read the retained result.
 - **Pending** — FOC submitted a request and is waiting for native readback.
 - **Active / Confirmed** — X4 returned the expected native state.
 
@@ -72,6 +72,14 @@ Open **Readiness** to distinguish proven captain vacancies from unknown records.
 Select the carrier on **Fleets**, then **Strategic Ops -> Carrier Air Wings**. Choose the direct group, role, and damage-recall threshold. **Saved wing** is the stored profile; dropdown changes remain drafts until **Apply to this exact X4 group and save profile** succeeds. Save your game normally afterward.
 
 Use **Show selected fleet / ship in X4 map** to inspect the commander without applying the draft. Home, rally-point, and target selection still use the separate FOC Operations Map.
+
+## Purchase or recover a fleet
+
+Open **Strategic Ops -> Coverage and Fleet Templates**. Save a Home and composition, open the saved fleet's **Review / Buy**, and prepare its whole-fleet quote. Inspect hulls, equipment, suppliers, quantities, and total before confirming purchase once. Saving or preparing alone does not buy ships.
+
+For ships already purchased, choose **Open Saved Fleet Templates -> Check Prepared Fleet Order -> Review Retained Fleet Recovery - No Charge**. Inspect the exact retained ships, then confirm recovery once if eligible. Use **View Verified Purchases / Fleet Delivery** to read assembly status. Do not buy again because delivery or readback is pending.
+
+See the [illustrated purchase and recovery walkthrough](PLAYER_GUIDE.md#8f-coverage-and-fleet-templates---plan-buy-and-recover).
 
 ## Other Strategic Ops workspaces
 

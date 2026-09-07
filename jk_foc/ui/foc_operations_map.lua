@@ -239,22 +239,7 @@ local function drawRouteStrokes()
             if ok and rect then menu.routeRects[#menu.routeRects + 1] = rect; drawn = drawn + 1 end
         end
     end
-    local marked = 0
-    for id, score in pairs(sectorScores) do
-        local center = menu.routeCenters[id]
-        if center and marked < 80 then
-            local color
-            if menu.analysisFilter == "ECONOMIC HOTSPOTS" then color = score >= 6 and green or score >= 3 and cyan or yellow
-            elseif menu.analysisFilter == "LOGISTICS PRESSURE" then color = score >= 6 and amber or yellow
-            else color = score >= 6 and red or score >= 3 and amber or yellow end
-            local ok1, line1 = pcall(Helper.drawLine, { x = center.x - 13, y = center.y }, { x = center.x + 13, y = center.y }, 7, 1, color, true)
-            local ok2, line2 = pcall(Helper.drawLine, { x = center.x, y = center.y - 13 }, { x = center.x, y = center.y + 13 }, 7, 1, color, true)
-            if ok1 and line1 then menu.routeRects[#menu.routeRects + 1] = line1 end
-            if ok2 and line2 then menu.routeRects[#menu.routeRects + 1] = line2 end
-            if ok1 and line1 and ok2 and line2 then marked = marked + 1 end
-        end
-    end
-    DebugError("[FOC][B056][ROUTE_DRAW] filter=" .. menu.analysisFilter .. " evidence_edges=" .. tostring(#ordered) .. " visible_strokes=" .. tostring(drawn) .. " evidence_sector_markers=" .. tostring(marked) .. " colors=FILTER_NOT_FACTION neutral_native_routes=VISIBLE")
+    -- B060: fixed red plus signs removed; they were not sector boundaries.
 end
 
 local function startRouteScan(delay)
@@ -340,6 +325,24 @@ end
 local function scheduleMapState(kind)
     menu.pendingStateTrace = { kind = kind, due = getElapsedTime() + 0.05 }
     startRouteScan(0.18)
+end
+
+function menu.checkCameraSettled(now)
+    if menu.holomap == 0 or now < (menu.nextCameraCheck or 0) then return end
+    menu.nextCameraCheck = now + 0.1
+    local pose = readMapState()
+    if not pose then return end
+    local prior = menu.overlayCameraPose
+    local changed = prior == nil
+    if prior then
+        for _, key in ipairs({ "x", "y", "z", "yaw", "pitch", "roll", "distance" }) do
+            if pose[key] ~= prior[key] then changed = true; break end
+        end
+    end
+    if changed then
+        menu.overlayCameraPose = pose
+        startRouteScan(0.35)
+    end
 end
 
 local function applyMapFilters()
@@ -429,7 +432,7 @@ local function createOverlay()
         maxVisibleHeight = Helper.viewHeight - 2 * Helper.frameBorder,
     })
     local row = top:addRow(true, { fixed = true })
-    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 055", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
+    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 072", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
     row[5]:createText("ANALYSIS", { halign = "right", color = cyan })
     row[6]:createDropDown(filterOptions, { startOption = menu.analysisFilter }):setTextProperties({ halign = "center" })
     row[6].handlers.onDropDownActivated = function()
@@ -482,8 +485,16 @@ local function createOverlay()
     local level = score >= 10 and "CRITICAL" or score >= 4 and "HIGH" or score > 0 and "ELEVATED" or "QUIET"
     local riskColor = score >= 10 and red or score > 0 and amber or green
 
-    local prow = panel:addRow(false, { fixed = true })
-    prow[1]:setColSpan(2):createText(menu.request and "MARK LOCATION | " .. safeText(menu.request.kind, "FOC REQUEST") or "HOVER-SECTOR INTELLIGENCE", { font = Helper.headerFont, color = menu.request and amber or cyan, halign = "center" })
+    local prow = panel:addRow(true, { fixed = true })
+    if menu.request then
+        prow[1]:setColSpan(2):createText("MARK LOCATION | " .. safeText(menu.request.kind, "FOC REQUEST"), { font = Helper.headerFont, color = amber, halign = "center" })
+    else
+        prow[1]:setColSpan(2):createButton({active=true}):setText("HOTSPOTS / FLEET TEMPLATES", {halign="center"})
+        prow[1].handlers.onClick=function()
+            if not menu.overlayFrame or menu.request then return end
+            for _,parent in ipairs(Menus or {}) do if parent.name=="FOC_Menu" and parent.openAdvisorFromMap then parent.openAdvisorFromMap(menu); return end end
+        end
+    end
     prow = panel:addRow(false, { fixed = true })
     prow[1]:setColSpan(2):createText(safeText(menu.hoveredSectorName or menu.selectedSectorName, "MOVE OVER A KNOWN SECTOR CELL"), { color = intel and riskColor or neutral, halign = "center" })
     prow = panel:addRow(false, { fixed = true })
@@ -536,6 +547,7 @@ local function createMapFrame()
 end
 
 function menu.cleanup()
+    menu.overlayCameraPose, menu.nextCameraCheck = nil, nil
     hideRouteRects()
     menu.cleanupCount = (menu.cleanupCount or 0) + 1
     if menu.holomap ~= 0 and menu.panningmap then C.StopPanMap(menu.holomap) end
@@ -559,6 +571,7 @@ function menu.cleanup()
 end
 
 function menu.onShowMenu()
+    menu.overlayCameraPose, menu.nextCameraCheck = nil, nil
     menu.param = menu.param or {}
     menu.param[1] = tonumber(menu.param[1]) or 0
     menu.param[2] = tonumber(menu.param[2]) or 0
@@ -672,7 +685,8 @@ function menu.onUpdate()
         menu.pendingStateTrace = nil
         traceMapState(kind)
     end
-    if menu.routeDirtyAt and menu.routeDirtyAt <= curtime and not menu.panningmap and not menu.rotatingmap then
+    menu.checkCameraSettled(curtime)
+    if menu.routeDirtyAt and menu.routeDirtyAt <= curtime and not menu.panningmap and not menu.rotatingmap and not menu.dropdownActive then
         menu.routeDirtyAt = nil
         beginRouteScan()
     end
