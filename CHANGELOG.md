@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.72 — Build 073
+
+- Fixed Academy list errors when a ship's sector is unavailable.
+- Marine and vacant-captain lists safely display UNKNOWN SECTOR without changing their ship identities or eligibility.
+- No changes to crew assignments, fleet orders, or purchasing.
+
 ## v1.71 — Build 072
 
 - Added Coverage and Fleet Templates: save fleet composition and Home, review NPC suppliers and equipment, and confirm the whole-fleet purchase price once.

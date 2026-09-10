@@ -11,7 +11,7 @@
 ## Manual installation
 
 1. Close X4: Foundations normally.
-2. Download [`FOC_v171.zip`](../dist/FOC_v171.zip).
+2. Download [`FOC_v172.zip`](../dist/FOC_v172.zip).
 3. Extract the archive.
 4. Copy the contained lowercase `jk_foc` folder into the X4 `extensions` directory.
 
@@ -36,10 +36,10 @@ Unsubscribe from the Workshop item or, for a manual installation, close X4 and r
 
 ## Verifying the archive
 
-The v1.71 archive SHA-256 is:
+The v1.72 archive SHA-256 is:
 
 ```text
-143B2F94CB031EC86089F89416218E536F9AABD1D548EDD013ECA145902E866D
+83AF5812B31A8238E532BECAC4578A3D842248B93B94A7505FDC7083BE024F85
 ```
 
 
@@ -47,7 +47,7 @@ The v1.71 archive SHA-256 is:
 
 After installing the complete v1.54 package with X4 closed, load your game and choose the intended carrier in **Fleets -> Strategic Ops -> Carrier Air Wings**. Check **Saved wing** for the exact carrier/group profile. A dropdown change alone is not a saved setting. Use Apply deliberately, check readback, and save the game normally.
 
-The archive link and checksum above identify the v1.71 distribution. The browser [player guide](PLAYER_GUIDE.md) is current for B072; older versioned PDFs remain historical references.
+The archive link and checksum above identify the v1.72 distribution. The browser [player guide](PLAYER_GUIDE.md) is current for B073; older versioned PDFs remain historical references.
 
 ## Existing fleet purchases
 

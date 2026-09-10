@@ -1,8 +1,8 @@
-# Fleet Operations Command v1.71 - Complete Player Guide
+# Fleet Operations Command v1.72 - Complete Player Guide
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 
-**Applies to:** Fleet Operations Command v1.71, Build 072
+**Applies to:** Fleet Operations Command v1.72, Build 073
 
 **Game:** X4: Foundations
 
@@ -10,7 +10,9 @@
 
 FOC is designed to be safe. It explains what it found, what it plans to do, and why an action was allowed or blocked. You stay in command.
 
-Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. This guide is current for Build 072. The purchasing and recovery walkthrough below uses new B072 screenshots.
+Older reference screenshots may show an earlier build number. These are genuine captures with their original build labels; they illustrate menu layout, not a guarantee of gameplay outcomes. This guide is current for Build 073. The purchasing and recovery walkthrough below retains B072 screenshots.
+
+Version 1.72 fixes Academy location labels: marine and vacant-captain lists show **UNKNOWN SECTOR** when a ship's sector is unavailable. This does not change crew assignments, fleet orders, or purchasing.
 
 **New fleet?** Go to [Coverage and Fleet Templates](#8f-coverage-and-fleet-templates---plan-buy-and-recover). **Already paid for ships?** Use [Recover an existing purchase](#recover-an-existing-purchase-without-buying-again). **Looking for automation settings?** See [Combat repair and transport shelter](#combat-repair-and-transport-shelter).
 
