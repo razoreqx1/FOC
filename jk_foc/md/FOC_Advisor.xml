@@ -44,6 +44,8 @@
      <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates">
       <raise_lua_event name="'FOC_Advisor.row'" param="'template'"/><raise_lua_event name="'FOC_Advisor.id'" param="$t.$id"/><raise_lua_event name="'FOC_Advisor.name'" param="$t.$name"/>
       <raise_lua_event name="'FOC_Advisor.home'" param="if @$t.$home.exists then $t.$home else 0"/><raise_lua_event name="'FOC_Advisor.homename'" param="if @$t.$home.exists then $t.$home.knownname else 'CHOOSE HOME'"/>
+      <raise_lua_event name="'FOC_Advisor.shipyard'" param="if @$t.$schema == 3 and @$t.$shipyard == 1 then 1 else 0"/><raise_lua_event name="'FOC_Advisor.supportmacro'" param="if $t.$supportmacro? then $t.$supportmacro else ''"/>
+      <raise_lua_event name="'FOC_Advisor.workup'" param="if $t.$workup? then $t.$workup else ''"/>
       <raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/>
       <do_for_each name="$e" in="$t.$entries"><raise_lua_event name="'FOC_Advisor.row'" param="'entry'"/><raise_lua_event name="'FOC_Advisor.parent'" param="$t.$id"/><raise_lua_event name="'FOC_Advisor.macro'" param="$e.$macro"/><raise_lua_event name="'FOC_Advisor.amount'" param="$e.$amount"/><raise_lua_event name="'FOC_Advisor.rowcommit'"/><set_value name="$count" operation="add" exact="1"/></do_for_each>
      </do_for_each>
@@ -53,14 +55,17 @@
   </cue>
   <cue name="Advisor_Save" instantiate="true" namespace="this"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'save'"/></conditions><actions><signal_cue_instantly cue="Advisor_SaveRecord" param="[event.param3,false]"/></actions></cue>
   <cue name="Advisor_SaveHome" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'save_v2'"/></conditions><actions><signal_cue_instantly cue="Advisor_SaveRecord" param="[event.param3,true]"/></actions></cue>
+  <cue name="Advisor_SaveShipyard" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Advisor'" control="'save_shipyard'"/></conditions><actions><signal_cue_instantly cue="Advisor_SaveRecord" param="[event.param3,true,true]"/></actions></cue>
   <cue name="Advisor_SaveRecord" instantiate="true" namespace="this">
    <conditions><event_cue_signalled/></conditions>
    <actions>
     <signal_cue_instantly cue="Advisor_Ensure"/><set_value name="$p" exact="event.param.{1}"/><set_value name="$withhome" exact="event.param.{2}"/>
-    <set_value name="$count" exact="$p.count - (if $withhome then 1 else 0)"/><set_value name="$home" exact="null"/>
+    <set_value name="$shipyard" exact="@event.param.{3} == true"/>
+    <set_value name="$count" exact="$p.count - (if $withhome then 1 else 0) - (if $shipyard then 1 else 0)"/><set_value name="$home" exact="null"/>
+    <set_value name="$support" exact="if $shipyard then $p.{$p.count} else ''"/>
     <set_value name="$reason" exact="'Template packet must contain one to eight complete ship entries.'"/>
     <set_value name="$valid" exact="$count ge 4 and $count le 18 and $count % 2 == 0 and global.$JKFOC_AdvisorTemplates.count le 20"/>
-    <do_if value="$valid and $withhome"><set_value name="$home" exact="@component.{$p.{$p.count}}"/><set_value name="$valid" exact="$home and @$home.exists and @$home.isclass.sector"/><do_if value="not $valid"><set_value name="$reason" exact="'Home sector could not be resolved. Choose Home again; your draft is retained.'"/></do_if></do_if>
+    <do_if value="$valid and $withhome"><set_value name="$home" exact="@component.{$p.{$count + 1}}"/><set_value name="$valid" exact="$home and @$home.exists and @$home.isclass.sector"/><do_if value="not $valid"><set_value name="$reason" exact="'Home sector could not be resolved. Choose Home again; your draft is retained.'"/></do_if></do_if>
     <set_value name="$slot" exact="0"/><set_value name="$prior" exact="null"/>
     <do_all exact="20" counter="$i"><do_if value="$p.{2} == 'Response Fleet %1'.[$i]"><set_value name="$slot" exact="$i"/></do_if></do_all>
     <do_for_each name="$t" in="global.$JKFOC_AdvisorTemplates"><do_if value="$t.$name == $p.{2}"><set_value name="$prior" exact="$t"/></do_if></do_for_each>
@@ -73,9 +78,17 @@
       <do_if value="$amount lt 1 or $amount gt 100 or $amount != ($amount)i or not $macro"><set_value name="$valid" exact="false"/></do_if>
       <set_value name="$total" operation="add" exact="$amount"/><append_to_list name="$entries" exact="table[$macro=$macro, $amount=$amount]"/>
      </do_all>
+     <do_if value="$shipyard">
+      <set_value name="$supportcount" exact="0"/><set_value name="$seen" exact="[]"/>
+      <do_for_each name="$e" in="$entries" counter="$i">
+       <do_if value="$seen.indexof.{$e.$macro}"><set_value name="$valid" exact="false"/></do_if><append_to_list name="$seen" exact="$e.$macro"/>
+       <do_if value="$e.$macro == $support"><set_value name="$supportcount" operation="add" exact="1"/><do_if value="$i == 1 or $e.$amount != 1"><set_value name="$valid" exact="false"/></do_if></do_if>
+      </do_for_each>
+      <do_if value="$supportcount != (if $support == '' then 0 else 1)"><set_value name="$valid" exact="false"/></do_if>
+     </do_if>
      <do_if value="$valid and $total le 100">
       <do_if value="$prior"><remove_from_list name="global.$JKFOC_AdvisorTemplates" exact="$prior" multiple="false"/></do_if>
-      <append_to_list name="global.$JKFOC_AdvisorTemplates" exact="table[$schema=2, $id=global.$JKFOC_AdvisorNext, $name=$p.{2}, $entries=$entries, $home=$home]"/>
+      <append_to_list name="global.$JKFOC_AdvisorTemplates" exact="table[$schema=(if $shipyard then 3 else 2), $shipyard=(if $shipyard then 1 else 0), $supportmacro=$support, $id=global.$JKFOC_AdvisorNext, $name=$p.{2}, $entries=$entries, $home=$home]"/>
       <set_value name="global.$JKFOC_AdvisorNext" operation="add" exact="1"/><signal_cue_instantly cue="Advisor_Snapshot" param="$p.{1}"/>
      </do_if>
      <do_else><raise_lua_event name="'FOC_Advisor.failure'" param="'Template rejected: whole quantities and at most 100 ships required.'"/><raise_lua_event name="'FOC_Advisor.save_rejected'" param="$p.{1}"/></do_else>

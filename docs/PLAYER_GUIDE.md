@@ -1,4 +1,6 @@
-# Fleet Operations Command v1.72 - Complete Player Guide
+# Fleet Operations Command - Player Guide
+
+**B079 / v1.78 update:** Start with the [Shipyard, loadout and crew quick start](SHIPYARD_v178.md). The illustrated B073 guide below is retained for its existing workflows; historical screenshots and navigation labels have not been relabeled as B079.
 
 ![Fleet Operations Command](images/FOC_GUIDE_COVER.png)
 

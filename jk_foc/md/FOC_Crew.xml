@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Crew" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="Crew_Ensure" instantiate="true"><conditions><event_cue_signalled/></conditions><actions>
+   <do_if value="not global.$JKFOC_CrewJobs?"><set_value name="global.$JKFOC_CrewJobs" exact="[]"/></do_if>
+  </actions></cue>
+  <cue name="Crew_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions><signal_cue_instantly cue="Crew_Ensure"/></actions></cue>
+  <!-- Recover only unattempted missing service roles from a complete matching workup. -->
+  <cue name="Crew_RepairRoles" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <set_value name="$job" exact="event.param"/><set_value name="$expected" exact="[]"/><set_value name="$valid" exact="$job.$template.$workupcrew? and $job.$template.$workupcrew.count le 8 and $job.$crew.count le 100 and @global.$JKFOC_PendingMarineTransfer.$crewjob != $job"/>
+   <do_if value="$valid"><do_for_each name="$e" in="$job.$template.$workupcrew">
+    <do_if value="not $e.$amount? or not $e.$service? or not $e.$marines? or $e.$amount lt 1 or $e.$amount gt 100 or $e.$service lt 0 or $e.$marines lt 0 or $e.$service + $e.$marines gt 100 or $expected.count + $e.$amount * ($e.$service + $e.$marines) gt 100"><set_value name="$valid" exact="false"/></do_if>
+    <do_else><do_all exact="$e.$amount" counter="$unit"><do_all exact="$e.$service + $e.$marines" counter="$person"><do_if value="$expected.count lt 100"><append_to_list name="$expected" exact="table[$macro=$e.$macro,$unit=$unit,$role=if $person le $e.$marines then entityrole.marine else entityrole.service]"/></do_if><do_else><set_value name="$valid" exact="false"/></do_else></do_all></do_all></do_else>
+   </do_for_each></do_if>
+   <do_if value="$valid and $expected.count == $job.$crew.count"><do_for_each name="$r" in="$job.$crew" counter="$i">
+    <set_value name="$e" exact="$expected.{$i}"/>
+    <do_if value="$r.$macro != $e.$macro or $r.$unit != $e.$unit or (@$r.$role != $e.$role and (@$r.$role != null or $e.$role != entityrole.service or $r.$state != 'RESERVED' or @$r.$record.$crewjob != $job))"><set_value name="$valid" exact="false"/></do_if>
+   </do_for_each></do_if><do_else><set_value name="$valid" exact="false"/></do_else>
+   <do_if value="$valid"><do_for_each name="$r" in="$job.$crew" counter="$i"><do_if value="@$r.$role == null"><set_value name="$r.$role" exact="$expected.{$i}.$role"/></do_if></do_for_each></do_if>
+  </actions></cue>
+  <!-- Reserve existing people before granting any build/payment permission. -->
+  <cue name="Crew_Reserve" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
+   <signal_cue_instantly cue="Crew_Ensure"/><set_value name="$job" exact="event.param"/><set_value name="$job.$crewvalid" exact="false"/>
+   <do_if value="$job.$crew?">
+    <set_value name="$job.$crewvalid" exact="global.$JKFOC_CrewJobs.indexof.{$job} or $job.$crew.count == 0"/>
+   </do_if>
+   <do_else>
+    <set_value name="$requests" exact="[]"/><set_value name="$pool" exact="[]"/><set_value name="$valid" exact="true"/>
+    <do_if value="$job.$template.$workupcrew?">
+     <do_for_each name="$e" in="$job.$template.$workupcrew">
+      <do_all exact="$e.$amount" counter="$unit"><do_all exact="$e.$service + $e.$marines" counter="$person">
+       <do_if value="$requests.count lt 100"><append_to_list name="$requests" exact="table[$macro=$e.$macro,$unit=$unit,$role=if $person le $e.$marines then entityrole.marine else entityrole.service,$state='RESERVED']"/></do_if>
+       <do_else><set_value name="$valid" exact="false"/></do_else>
+      </do_all></do_all>
+     </do_for_each>
+    </do_if>
+    <do_if value="$requests.count">
+     <set_value name="$valid" exact="$valid and global.$JKFOC_CrewJobs.count lt 20 and global.$JKFOC_Academy? and global.$JKFOC_Academy.count le 100 and not global.$JKFOC_PendingMarineTransfer?"/>
+     <do_if value="$valid"><do_for_each name="$r" in="global.$JKFOC_Academy">
+      <do_if value="not $r.$crewjob? and @$r.$origin.exists and $r.$origin.owner == faction.player and not $r.$origin.ismission and $r.$origin.people.{$r.$template}.exists"><append_to_list name="$pool" exact="$r"/></do_if>
+     </do_for_each></do_if>
+     <do_if value="$pool.count lt $requests.count"><set_value name="$valid" exact="false"/></do_if>
+    </do_if>
+    <do_if value="$valid">
+     <set_value name="$job.$crew" exact="$requests"/><set_value name="$job.$crewready" exact="$requests.count == 0"/><set_value name="$job.$crewvalid" exact="true"/>
+     <do_for_each name="$request" in="$requests" counter="$i"><set_value name="$request.$record" exact="$pool.{$i}"/><set_value name="$request.$record.$crewjob" exact="$job"/></do_for_each>
+     <do_if value="$requests.count"><append_to_list name="global.$JKFOC_CrewJobs" exact="$job"/><set_value name="$job.$crewmessage" exact="'Academy crew reserved; awaiting delivery.'"/></do_if>
+    </do_if>
+    <do_else><set_value name="$job.$crewmessage" exact="'Not enough unreserved Academy recruits, or another transfer is pending. No new build/payment permitted.'"/></do_else>
+   </do_else>
+  </actions></cue>
+  <!-- Retained jobs only; one native transfer per five-second cycle. -->
+  <cue name="Crew_Monitor" checkinterval="5s" namespace="this"><conditions><check_value value="@global.$JKFOC_CrewJobs.count gt 0"/></conditions><actions>
+   <set_value name="$mutated" exact="false"/><set_value name="$finished" exact="[]"/>
+   <do_if value="global.$JKFOC_CrewJobs.count le 20"><do_for_each name="$job" in="global.$JKFOC_CrewJobs">
+    <signal_cue_instantly cue="Crew_RepairRoles" param="$job"/>
+    <set_value name="$complete" exact="true"/>
+    <do_if value="$job.$crew.count le 100"><do_for_each name="$request" in="$job.$crew">
+     <do_if value="$request.$state != 'COMPLETE'">
+      <set_value name="$complete" exact="false"/>
+      <do_if value="not [entityrole.marine,entityrole.service].indexof.{@$request.$role}"><set_value name="$job.$crewmessage" exact="'Saved crew role could not be safely verified. Crew request retained; inspect the ship and report this job. No transfer repeated.'"/></do_if>
+      <do_if value="$request.$state == 'RESERVED' and [entityrole.marine,entityrole.service].indexof.{@$request.$role} and not $mutated and not global.$JKFOC_PendingMarineTransfer? and @$job.$approved and @$job.$ships.count le 100">
+       <set_value name="$entry" exact="null"/><set_value name="$index" exact="0"/>
+       <do_for_each name="$e" in="$job.$ships"><do_if value="$e.$macro.id == $request.$macro"><set_value name="$index" operation="add" exact="1"/><do_if value="$index == $request.$unit"><set_value name="$entry" exact="$e"/></do_if></do_if></do_for_each>
+       <set_value name="$ship" exact="@$entry.$ship"/><set_value name="$r" exact="$request.$record"/>
+       <do_if value="@$entry.$state == 'DELIVERED' and @$ship.exists and $ship.isoperational and $ship.owner == faction.player and $ship != player.controlled and not $ship.ismission and global.$JKFOC_ProtectedShipIDs? and not global.$JKFOC_ProtectedShipIDs.indexof.{$ship.idcode} and not @$ship.commander and $ship.orders? and $ship.orders.count == 0 and @$ship.order == @$entry.$oldorder and @$ship.defaultorder == @$entry.$olddefault and $ship.people.free gt 0 and $r.$crewjob == $job and @$r.$origin.exists and $r.$origin.owner == faction.player and $r.$origin.people.{$r.$template}.exists">
+        <set_value name="$possible" exact="false"/><assign_hired_actor actor="[$r.$origin,$r.$template]" target="$ship" role="$request.$role" check="true" success="$possible"/>
+        <do_if value="$possible">
+         <!-- Lease first: ambiguous dispatch is never replayed. -->
+         <set_value name="$request.$state" exact="'TRANSFER PENDING'"/>
+         <set_value name="global.$JKFOC_PendingMarineTransfer" exact="table[$crewjob=$job,$crewrequest=$request,$role=$request.$role,$academyid=$r.$id,$origin=$r.$origin,$template=$r.$template,$actor=$r.$origin.roleentity.{$r.$template},$ship=$ship,$traineename=$r.$origin.people.{$r.$template}.name,$shipname=$ship.knownname,$shipid=$ship.idcode,$oldpeople=$ship.people.count,$oldmarines=$ship.people.{entityrole.marine}.count,$started=player.age]"/>
+         <set_value name="$mutated" exact="true"/><set_value name="$sent" exact="false"/><assign_hired_actor actor="[$r.$origin,$r.$template]" target="$ship" role="$request.$role" success="$sent"/>
+         <set_value name="$job.$crewmessage" exact="if $sent then 'Crew transfer accepted; waiting for exact person and role.' else 'Crew dispatch uncertain; retained lease prevents duplicate transfer.'"/>
+        </do_if>
+       </do_if>
+      </do_if>
+     </do_if>
+    </do_for_each></do_if>
+    <do_else><set_value name="$complete" exact="false"/></do_else>
+    <do_if value="$complete"><set_value name="$job.$crewready" exact="true"/><set_value name="$job.$crewmessage" exact="'Requested Academy crew verified aboard.'"/><append_to_list name="$finished" exact="$job"/><signal_cue_instantly cue="md.FOC_Deployment.Deployment_Check" param="$job"/></do_if>
+   </do_for_each></do_if>
+   <do_for_each name="$job" in="$finished"><remove_from_list name="global.$JKFOC_CrewJobs" exact="$job" multiple="false"/></do_for_each>
+  </actions><cues><cue name="Crew_Repeat"><delay exact="5s"/><actions><reset_cue cue="Crew_Monitor"/></actions></cue></cues></cue>
+ </cues>
+</mdscript>

@@ -7,28 +7,33 @@
 Fleet Operations Command (FOC) is a player-first fleet readiness, patrol, recovery, training, and distress-response console for **X4: Foundations**. It turns large-empire fleet management into clear, bounded decisions while keeping the player in command.
 
 [![Steam Workshop](https://img.shields.io/badge/Steam-Workshop-1b2838?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
-![Release](https://img.shields.io/badge/release-v1.72-blue)
+![Release](https://img.shields.io/badge/release-v1.78-blue)
 ![Game](https://img.shields.io/badge/game-X4%3A%20Foundations-orange)
 
 ## Current release
 
-- Public version: **1.72**
-- Governed runtime identity: **Build 073 / extension version 172**
-- Release archive: [`dist/FOC_v172.zip`](dist/FOC_v172.zip)
-- Release SHA-256: `83AF5812B31A8238E532BECAC4578A3D842248B93B94A7505FDC7083BE024F85`
+- Public version: **1.78**
+- Governed runtime identity: **Build 079 / extension version 178**
+- Release archive: [`dist/FOC_v178.zip`](dist/FOC_v178.zip)
+- Release SHA-256: `ECBB23A1623A2ABA4CEFDF72109791B04B1ED87477B518ED2474D63683F38652`
 - Previous v1.54 PDF guide: [`docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf`](docs/FOC_v1.54_COMPLETE_PLAYER_GUIDE.pdf)
 - Browser-readable player guide: [`docs/PLAYER_GUIDE.md`](docs/PLAYER_GUIDE.md)
 - Steam Workshop: [Fleet Operations Command](https://steamcommunity.com/sharedfiles/filedetails/?id=3793624775)
 
-This repository contains the exact 21 runtime files from Build 073. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
+This repository contains the exact 27 runtime files from Build 079. Publication files, documentation, and artwork are outside the installable `jk_foc` folder.
 
-## v1.72 documentation
+## v1.78 documentation
 
-The [updated player guide](docs/PLAYER_GUIDE.md) includes fleet planning, NPC purchasing, no-charge recovery of retained ships, assembly, Home patrol, and save/reload guidance with genuine B072 screenshots. Older PDF guides and downloads remain available as historical versions. The current archive and source contain the matching Build 073 runtime.
+Start with the new [Shipyard quick start](docs/SHIPYARD_v178.md). The [updated player guide](docs/PLAYER_GUIDE.md) includes fleet planning, NPC purchasing, no-charge recovery of retained ships, assembly, Home patrol, and save/reload guidance with genuine B072 screenshots. Older PDF guides and downloads remain available as historical versions. The current archive and source contain the matching Build 079 runtime.
 
-## New in v1.72
+## New in v1.78
 
-Fixed Academy errors when a ship's sector is unavailable. Marine and vacant-captain lists now safely show **UNKNOWN SECTOR**. Crew assignments, fleet orders, and purchasing are unchanged.
+- Added question-led Home and Shipyard task-force creation, reusable templates, S/M escorts and optional auxiliary support.
+- Added own-yard distribution and combined NPC/owned-yard orders. Select owned-yard construction to use only your stations; combined orders prefer NPC suppliers where available.
+- Added compatible saved loadouts, equipment-slot editing and service-crew/marine workup; Academy recruitment supports 100 personnel.
+- Added optional guarded capture attempts; success is not guaranteed.
+- Corrected the native service-crew role and guarded repair of exactly matched, unattempted saved requests.
+- Improved workflow pointers, visible template saving and own-yard messaging.
 
 ## New in v1.71
 
@@ -77,7 +82,7 @@ Subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedet
 ### Manual installation
 
 1. Close X4: Foundations.
-2. Download [`FOC_v172.zip`](dist/FOC_v172.zip).
+2. Download [`FOC_v178.zip`](dist/FOC_v178.zip).
 3. Extract the lowercase `jk_foc` folder into the game's `extensions` directory.
 4. Confirm the final path ends with `X4 Foundations/extensions/jk_foc/content.xml`.
 5. Start X4 and enable Fleet Operations Command if needed.

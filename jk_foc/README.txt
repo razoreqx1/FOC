@@ -1,6 +1,75 @@
-Fleet Operations Command - Build 072 / version 171 TEST candidate
+Fleet Operations Command - Build 079 / version 178 TEST
 
-Build 072 recovery order correction:
+Build 079: service-crew role correction
+- Uses the native service-crew role; marine and captain handling remain separate.
+- Repairs only unattempted missing service roles with exact saved-workup evidence.
+- Pending transfers are never replayed by this correction.
+
+Retained fleet orders, equipment and crew workup:
+- Shipyard offers owned-yard, NPC or mixed sourcing under one order approval.
+  Owned ships are spread across eligible player yards. Native resources, queues,
+  blueprints and equipment availability still control construction time.
+- Choose saved X4 loadouts or edit compatible equipment slots, ammunition,
+  drones and software. Save equipment and crew with the reusable template.
+  Equipment choices apply to every ship of that model in the template.
+- Select marines and service crew separately, within each ship's native capacity.
+  Existing Academy recruits are reserved before ordering and transferred after
+  delivery. No free people are generated. The Academy pool supports100 recruits.
+  Assembly waits for exact requested crew transfers to be verified.
+- Settings offers Attempt Capture, initially OFF. Eligible combat fleets with
+  sufficient available marines may attempt boarding hostile capital ships.
+  Outmatched/unknown/conflicting cases continue normal combat. Capture is not
+  guaranteed; the latest outcome is retained in Settings across reload.
+- The completed fleet gathers and waits at its assembly sector, ready for the
+  player to choose its mission in Fleets. Order submission is not arrival proof.
+- Saving and reviewing spend nothing. Partial or uncertain orders/transfers are
+  retained, never automatically purchased or dispatched again.
+- TEST artifact: affected native execution, UI, reload, arrival, crew transfer
+  and boarding behavior require in-game acceptance of this exact build.
+
+Build 077: owned-yard construction review
+- Check only requested hulls at eligible owned yards, without repeatedly scanning
+  unrelated module catalogues. Blueprint and equipment checks remain in force.
+- Construction review gives specific limits or unavailable-hull reasons.
+
+Build 076: S/M combat escorts
+- The Shipyard escort picker offers S- and M-class combat ships only.
+- Flagship selection remains unchanged; auxiliary supply ships such as Nomad
+  stay in their separate picker. Existing fleets, templates and jobs are retained.
+
+Build 075: clearer Shipyard flow
+- Follow the -> next-step pointer. Short pages use measured available space;
+  paging remains only when the current viewport needs it.
+- Choose SAVE AS TEMPLATE - NO PURCHASE to keep a reusable composition.
+- NPC buying and player-yard construction have separate availability checks.
+  An unavailable route names the hull/reason instead of opening a failed quote.
+- Known unavailable auxiliary hulls remain visible with their supplier/blueprint
+  or loadout reason. The exact historical missing-Nomad cause is not confirmed.
+- Purchase approval, resources and delayed assembly safeguards remain unchanged.
+
+Build 074: guided Home and Shipyard
+- Home starts with questions. Choose "How do I build a new task force?" or open Shipyard.
+- Start a composition or reuse a saved template. Choose a flagship, escort hulls/counts,
+  optionally one auxiliary such as a Nomad, then an assembly sector.
+- Review the NPC equipment and complete price, or the owned-yard construction plan.
+  Saving the template and preparing the review spend nothing. Approve the order once.
+- Native yard availability, blueprints, licences, equipment and resources still apply.
+- Delivered ships are assembled under the selected flagship. Escorts defend it; an
+  auxiliary receives Supply Fleet. Native follow/supply orders are checked explicitly.
+- The leader gathers and waits at the assembly sector. READY FOR ASSIGNMENT means
+  assembly/order readback, not physical arrival. Select the fleet in Fleets to choose
+  Home and mission, then Send once. New fleets are locked against global FOC plans
+  until explicitly sent/unlocked; older purchases retain their previous patrol policy.
+- This construction action does not purchase supply cargo or promise repairs. Native
+  auxiliary behavior may subsequently trade for resources under the game's rules.
+- CHECK never buys again. Incomplete receipts or changed player orders can still
+  require exceptional no-charge recovery; do not repeat an uncertain purchase.
+- TEST only. Native UI, construction, delivery, supply behavior, assembly and save/reload
+  require testing of this exact artifact. No live installation or publication included.
+
+Retained Build 073: Academy snapshot safely handles actors without a current sector.
+
+Historical Build 072 recovery order correction:
 - Explicit recovery can reconcile missing order history with only an empty-queue default Hold Position, never queued work or another assignment.
 - Review captures exact current orders; confirmation and delayed assembly preserve newer player changes. Historical order records remain intact.
 - Recovery diagnostics identify ship and order-check results. No second purchase or charge; actual in-game assembly remains RUNTIME ACCEPTANCE REQUIRED.

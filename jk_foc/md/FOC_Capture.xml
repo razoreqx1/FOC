@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Capture" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <cue name="Capture_Ensure" instantiate="true"><conditions><event_cue_signalled/></conditions><actions>
+   <do_if value="not global.$JKFOC_AttemptCapture?"><set_value name="global.$JKFOC_AttemptCapture" exact="false"/></do_if>
+   <do_if value="not global.$JKFOC_CaptureOps?"><set_value name="global.$JKFOC_CaptureOps" exact="[]"/></do_if>
+   <do_if value="not global.$JKFOC_CaptureNext?"><set_value name="global.$JKFOC_CaptureNext" exact="0s"/></do_if>
+   <do_if value="not global.$JKFOC_CaptureResult?"><set_value name="global.$JKFOC_CaptureResult" exact="'No boarding attempt recorded.'"/></do_if>
+  </actions></cue>
+  <cue name="Capture_Load" instantiate="true"><conditions><event_game_loaded/></conditions><actions><signal_cue_instantly cue="Capture_Ensure"/></actions></cue>
+  <cue name="Capture_Read" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Capture'" control="'read'"/></conditions><actions><signal_cue_instantly cue="Capture_Ensure"/><raise_lua_event name="'FOC_Capture.result'" param="global.$JKFOC_CaptureResult"/><raise_lua_event name="'FOC_Capture.policy'" param="if global.$JKFOC_AttemptCapture then 1 else 0"/></actions></cue>
+  <cue name="Capture_Set" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Capture'" control="'set'"/></conditions><actions><signal_cue_instantly cue="Capture_Ensure"/><do_if value="event.param3 == 0 or event.param3 == 1"><set_value name="global.$JKFOC_AttemptCapture" exact="event.param3 == 1"/></do_if><raise_lua_event name="'FOC_Capture.policy'" param="if global.$JKFOC_AttemptCapture then 1 else 0"/></actions></cue>
+  <cue name="Capture_Stop" instantiate="true"><conditions><event_ui_triggered screen="'FOC_Menu'" control="'plan_action'"/><check_value value="@event.param3.{1} == 'STOP_AUTOMATION'"/></conditions><actions><set_value name="global.$JKFOC_AttemptCapture" exact="false"/><raise_lua_event name="'FOC_Capture.policy'" param="0"/></actions></cue>
+  <!-- Incoming events are cheap-gated; at most one bounded fleet assessment per 5s. -->
+  <cue name="Capture_Attack" instantiate="true" namespace="this"><conditions><event_player_owned_attacked_object/><check_value value="@global.$JKFOC_AttemptCapture and player.age ge @global.$JKFOC_CaptureNext"/></conditions><actions>
+   <signal_cue_instantly cue="Capture_Ensure"/><set_value name="global.$JKFOC_CaptureNext" exact="player.age + 5s"/>
+   <set_value name="$ship" exact="event.param"/><set_value name="$target" exact="event.param2"/>
+   <do_if value="@$ship.exists and $ship.isclass.ship and @$target.exists and $target.isclass.ship and $target.iscapitalship and $target.iscapturable and $target.owner != faction.player and $target.hasrelation.enemy.{faction.player} and not $target.ismission and $target.boardingoperations.count == 0">
+    <set_value name="$leader" exact="if @$ship.commander.exists then $ship.commander else $ship"/>
+    <do_if value="not @$leader.commander and $leader.allsubordinates.count lt 100 and global.$JKFOC_CaptureOps.count lt 20 and (not $leader.$jkfoc_captureuntil? or player.age ge $leader.$jkfoc_captureuntil)">
+     <set_value name="$leader.$jkfoc_captureuntil" exact="player.age + 60s"/>
+     <set_value name="$members" exact="[$leader]"/><do_for_each name="$m" in="$leader.allsubordinates"><append_to_list name="$members" exact="$m"/></do_for_each>
+     <set_value name="$request" exact="table[$leader=$leader,$target=$target,$members=$members,$evidence=[]]"/>
+     <do_for_each name="$m" in="$members"><append_to_list name="$request.$evidence" exact="table[$ship=$m,$order=@$m.order,$default=@$m.defaultorder,$commander=@$m.commander,$assignment=@$m.assignment,$group=@$m.subordinategroupid,$target=@$m.order.$primarytarget,$destination=@$m.defaultorder.$destination,$radius=@$m.defaultorder.$radius]"/></do_for_each>
+     <signal_cue_instantly cue="Capture_Check" param="$request"/>
+    </do_if>
+   </do_if>
+  </actions></cue>
+  <cue name="Capture_Check" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><delay exact="1s"/><actions>
+   <set_value name="$r" exact="event.param"/><set_value name="$target" exact="$r.$target"/><set_value name="$leader" exact="$r.$leader"/>
+   <set_value name="$valid" exact="@global.$JKFOC_AttemptCapture and @$target.exists and @$leader.exists and global.$JKFOC_CaptureOps.count lt 20 and global.$JKFOC_ProtectedShipIDs? and global.$JKFOC_RecoveryJobs? and global.$JKFOC_RecoveryJobs.count le 128 and global.$JKFOC_ResponseLocks? and global.$JKFOC_ResponseLocks.count le 128"/>
+   <set_value name="$strength" exact="0"/><set_value name="$marines" exact="0"/><set_value name="$capitals" exact="0"/><set_value name="$xl" exact="0"/><set_value name="$combat" exact="0"/>
+   <do_if value="$valid">
+    <set_value name="$valid" exact="$target.iscapturable and $target.iscapitalship and not $target.ismission and $target.owner != faction.player and $target.hasrelation.enemy.{faction.player} and $target.boardingoperations.count == 0 and $target.boardingresistance? and $target.boardingresistance ge 0 and $leader.allsubordinates.count + 1 == $r.$members.count and not @$leader.commander"/>
+    <do_for_each name="$old" in="$r.$evidence">
+     <set_value name="$m" exact="$old.$ship"/>
+     <do_if value="not @$m.exists"><set_value name="$valid" exact="false"/></do_if>
+     <do_else>
+      <do_if value="$m.owner != faction.player or not $m.isoperational or $m == player.controlled or $m.ismission or global.$JKFOC_ProtectedShipIDs.indexof.{$m.idcode} or $m == @md.Story_Terraforming.Start.$BettyShip or not @$m.assignedpilot.exists or $m.sector != $target.sector or @$m.boardingoperation.exists or $m.boardingoperations.count or @$m.commander != $old.$commander or @$m.order != $old.$order or @$m.defaultorder != $old.$default or not $m.orders? or $m.orders.count gt 0 or $m.hullpercentage lt 75 or ($m != $leader and not $leader.allsubordinates.indexof.{$m})"><set_value name="$valid" exact="false"/></do_if>
+      <do_if value="@$m.assignment != @$old.$assignment or @$m.subordinategroupid != @$old.$group or @$m.order.$primarytarget != @$old.$target or @$m.defaultorder.$destination != @$old.$destination or @$m.defaultorder.$radius != @$old.$radius"><set_value name="$valid" exact="false"/></do_if>
+      <!-- Only native standing patrol/guard and its subordinate work. Explicit queued orders are excluded. -->
+      <do_if value="$m == $leader and (not @$m.defaultorder.exists or not ['Patrol','ProtectPosition'].indexof.{$m.defaultorder.id} or $m.order != $m.defaultorder)"><set_value name="$valid" exact="false"/></do_if>
+      <do_if value="$m != $leader and @$m.order.exists and not ['Escort','Follow','Attack','Wait'].indexof.{$m.order.id}"><set_value name="$valid" exact="false"/></do_if>
+      <do_if value="@$m.order.exists and ($m.order.isoverride or ($m.order.id == 'Attack' and @$m.order.$primarytarget != $target))"><set_value name="$valid" exact="false"/></do_if>
+      <do_for_each name="$lock" in="global.$JKFOC_ResponseLocks"><do_if value="@$lock.$commander == $m"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+      <do_if value="global.$JKFOC_RecoveryJobs?"><do_for_each name="$j" in="global.$JKFOC_RecoveryJobs"><do_if value="@$j.$ship == $m"><set_value name="$valid" exact="false"/></do_if></do_for_each></do_if>
+      <do_if value="@global.$JKFOC_PendingMarineTransfer.$ship == $m"><set_value name="$valid" exact="false"/></do_if>
+      <do_if value="$m.primarypurpose == purpose.fight"><set_value name="$combat" operation="add" exact="1"/><do_if value="$m.iscapitalship"><set_value name="$capitals" operation="add" exact="1"/></do_if><do_if value="$m.isclass.ship_xl"><set_value name="$xl" operation="add" exact="1"/></do_if></do_if>
+      <do_if value="not $m.availablepeople.{entityrole.marine}.count? or not $m.boardingstrength?"><set_value name="$valid" exact="false"/></do_if>
+      <do_elseif value="$m.availablepeople.{entityrole.marine}.count gt 0"><set_value name="$marines" operation="add" exact="$m.availablepeople.{entityrole.marine}.count"/><set_value name="$strength" operation="add" exact="$m.boardingstrength"/></do_elseif>
+     </do_else>
+    </do_for_each>
+    <do_for_each name="$op" in="global.$JKFOC_CaptureOps"><do_if value="$op.$target == $target or $op.$leader == $leader"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+    <set_value name="$valid" exact="$valid and $marines gt 0 and $strength ge $target.boardingresistance and $combat ge 2 and $capitals ge 1 and (not $target.isclass.ship_xl or $xl ge 1 or $capitals ge 2)"/>
+   </do_if>
+   <do_if value="$valid">
+    <set_value name="$r.$state" exact="'RESERVED'"/><append_to_list name="global.$JKFOC_CaptureOps" exact="$r"/>
+    <create_boarding_operation target="$target" faction="faction.player" approach="70" insertion="30" result="$operation"/><set_value name="$r.$operation" exact="$operation"/>
+    <do_if value="@$operation.exists">
+     <set_value name="$tiers" exact="entityrole.marine.tiers"/>
+     <do_for_each name="$m" in="$r.$members">
+      <set_value name="$amounts" exact="[]"/><do_for_each name="$tier" in="$tiers"><append_to_list name="$amounts" exact="$m.availablepeople.{entityrole.marine}.{$tier}.count"/></do_for_each>
+      <add_boarding_attacker attacker="$m" operation="$operation" behavior="if $m.primarypurpose != purpose.fight then boardingbehaviour.maintaindistance else if $m.iscapitalship then boardingbehaviour.targetturrets else boardingbehaviour.targetengines"><marines amounts="$amounts" skills="$tiers"/></add_boarding_attacker>
+     </do_for_each>
+     <set_value name="$r.$state" exact="'BOARDING'"/><start_boarding_operation operation="$operation"/>
+     <set_value name="global.$JKFOC_CaptureResult" exact="'Boarding attempt started: %1 to %2. Outcome pending.'.[$leader.idcode,$target.idcode]"/><raise_lua_event name="'FOC_Capture.result'" param="global.$JKFOC_CaptureResult"/>
+    </do_if>
+    <do_else><set_value name="$r.$state" exact="'UNVERIFIED'"/><set_value name="global.$JKFOC_CaptureResult" exact="'Boarding creation unverified for %1 to %2. No automatic retry.'.[$leader.idcode,$target.idcode]"/></do_else>
+   </do_if>
+  </actions></cue>
+  <cue name="Capture_Monitor" checkinterval="5s" namespace="this"><conditions><check_value value="@global.$JKFOC_CaptureOps.count gt 0"/></conditions><actions>
+   <set_value name="$done" exact="[]"/>
+   <do_if value="global.$JKFOC_CaptureOps.count le 20"><do_for_each name="$r" in="global.$JKFOC_CaptureOps">
+    <do_if value="not @$r.$target.exists or $r.$target.owner == faction.player or ($r.$state == 'BOARDING' and not @$r.$operation.exists)">
+     <set_value name="global.$JKFOC_CaptureResult" exact="if @$r.$target.exists and $r.$target.owner == faction.player then 'Captured ship ownership verified: %1'.[$r.$target.idcode] else 'Boarding ended without verified player ownership.'"/><raise_lua_event name="'FOC_Capture.result'" param="global.$JKFOC_CaptureResult"/><append_to_list name="$done" exact="$r"/>
+    </do_if>
+   </do_for_each></do_if>
+   <do_for_each name="$r" in="$done"><remove_from_list name="global.$JKFOC_CaptureOps" exact="$r" multiple="false"/></do_for_each>
+  </actions><cues><cue name="Capture_Repeat"><delay exact="5s"/><actions><reset_cue cue="Capture_Monitor"/></actions></cue></cues></cue>
+ </cues>
+</mdscript>

@@ -68,7 +68,7 @@
    <conditions><event_player_build_finished/></conditions>
    <actions>
     <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$sessions" exact="[]"/>
-    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
+    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2 or (@global.$JKFOC_NPCCapture.$schema == 3 and @global.$JKFOC_NPCCapture.$prepared and @global.$JKFOC_NPCCapture.$mixed)"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
     <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><append_to_list name="$sessions" exact="$j"/></do_for_each>
     <do_for_each name="$session" in="$sessions"><do_for_each name="$r" in="$session.$records">
      <do_if value="$r.$task == event.param3 and $r.$state == 'QUEUED'">
@@ -91,7 +91,7 @@
    <conditions><event_player_build_cancelled/></conditions>
    <actions>
     <signal_cue_instantly cue="NPC_Ensure"/><set_value name="$sessions" exact="[]"/>
-    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
+    <do_if value="@global.$JKFOC_NPCCapture.$schema == 2 or (@global.$JKFOC_NPCCapture.$schema == 3 and @global.$JKFOC_NPCCapture.$prepared and @global.$JKFOC_NPCCapture.$mixed)"><append_to_list name="$sessions" exact="global.$JKFOC_NPCCapture"/></do_if>
     <do_for_each name="$j" in="global.$JKFOC_NPCJobs"><append_to_list name="$sessions" exact="$j"/></do_for_each>
     <do_for_each name="$session" in="$sessions"><do_for_each name="$r" in="$session.$records">
      <do_if value="$r.$task == event.param and $r.$state == 'QUEUED'"><set_value name="$r.$state" exact="'CANCELLED'"/><set_value name="$session.$revision" operation="add" exact="1"/><remove_value name="$session.$review"/></do_if>
@@ -111,7 +111,7 @@
   </actions></cue>
   <cue name="NPC_Validate" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
    <set_value name="$p" exact="event.param"/><set_value name="$s" exact="$p.$session"/>
-   <set_value name="$p.$valid" exact="@$s.$schema == 2 and not $s.$overflow and $s.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$s.$template} and $s.$records.count == $s.$total and $s.$total ge 1 and $s.$total le 100"/>
+   <set_value name="$p.$valid" exact="(@$s.$schema == 2 or (@$s.$schema == 3 and @$s.$prepared and @$s.$mixed)) and not $s.$overflow and $s.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$s.$template} and $s.$records.count == $s.$total and $s.$total ge 1 and $s.$total le 100"/>
    <set_value name="$seen" exact="[]"/><set_value name="$ships" exact="[]"/>
    <do_if value="$p.$valid">
     <do_for_each name="$e" in="$s.$template.$entries"><set_value name="$count" exact="0"/><do_for_each name="$r" in="$s.$records"><do_if value="$r.$macro.id == $e.$macro"><set_value name="$count" operation="add" exact="1"/></do_if></do_for_each><do_if value="$count != $e.$amount"><set_value name="$p.$valid" exact="false"/></do_if></do_for_each>
@@ -139,7 +139,7 @@
    </do_for_each>
    <raise_lua_event name="'FOC_NPC_Purchases.jobcount'" param="global.$JKFOC_NPCJobs.count"/>
    <do_if value="not $s and global.$JKFOC_NPCJobs.count"><set_value name="$s" exact="global.$JKFOC_NPCJobs.{global.$JKFOC_NPCJobs.count}"/></do_if>
-   <do_if value="$s and @$s.$schema == 2">
+   <do_if value="$s and (@$s.$schema == 2 or (@$s.$schema == 3 and @$s.$prepared and @$s.$mixed))">
     <set_value name="$s.$armed" exact="false"/>
     <do_if value="not $s.$approved and not @$s.$prepared and player.age - $s.$started gt 30min"><set_value name="$s.$closed" exact="true"/><set_value name="$s.$state" exact="'CAPTURE EXPIRED'"/></do_if>
     <set_value name="$s.$review" exact="if not $s.$overflow and not $s.$approved then $s.$revision else -1"/>
@@ -184,7 +184,7 @@
   </actions></cue>
   <cue name="NPC_Snapshot" instantiate="true" namespace="this"><conditions><event_cue_signalled/></conditions><actions>
    <set_value name="$s" exact="event.param.$session"/>
-   <do_if value="$s and @$s.$schema == 2 and $s.$records.count le 100">
+   <do_if value="$s and (@$s.$schema == 2 or (@$s.$schema == 3 and @$s.$prepared and @$s.$mixed)) and $s.$records.count le 100">
     <raise_lua_event name="'FOC_NPC_Purchases.prepared'" param="if @$s.$prepared then 1 else 0"/>
     <raise_lua_event name="'FOC_NPC_Purchases.token'" param="$s.$token"/><raise_lua_event name="'FOC_NPC_Purchases.revision'" param="$s.$revision"/><raise_lua_event name="'FOC_NPC_Purchases.template'" param="$s.$template.$id"/>
     <raise_lua_event name="'FOC_NPC_Purchases.home'" param="$s.$homekey"/><raise_lua_event name="'FOC_NPC_Purchases.state'" param="if $s.$deploymentmessage? then $s.$state + ': ' + $s.$deploymentmessage else $s.$state"/>

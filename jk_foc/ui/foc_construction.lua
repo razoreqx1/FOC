@@ -17,6 +17,10 @@ function B.send(kind, data)
 end
 function B.prepare(template, sector)
     if B.pending then return false end
+    if type(template)=='table' and template.workup and template.workup~='' and FOC_Procurement then
+        FOC_Procurement.prepare('OWNED')
+        return false -- Procurement owns navigation; do not replace its workup with the legacy preset page.
+    end
     local id = FOC_Advisor and FOC_Advisor.component(sector)
     if not id or type(template)~='table' or not tonumber(template.id) then
         B.message='Select a Home area and a saved template first.'; return false

@@ -432,7 +432,7 @@ local function createOverlay()
         maxVisibleHeight = Helper.viewHeight - 2 * Helper.frameBorder,
     })
     local row = top:addRow(true, { fixed = true })
-    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 073", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
+    row[1]:setColSpan(4):createText("FOC HISTORICAL INTELLIGENCE MAP  |  BUILD 079", { font = Helper.headerFont, fontsize = Helper.standardFontSize + 3, color = cyan })
     row[5]:createText("ANALYSIS", { halign = "right", color = cyan })
     row[6]:createDropDown(filterOptions, { startOption = menu.analysisFilter }):setTextProperties({ halign = "center" })
     row[6].handlers.onDropDownActivated = function()

@@ -150,7 +150,8 @@ local buildOperationsIntel
 local bridgeComponent64
 
 local tabs = {
-    { id = "command", label = "COMMAND" },
+    { id = "command", label = "HOME" },
+    { id = "shipyard", label = "SHIPYARD" },
     { id = "fleets", label = "FLEETS" },
     { id = "taskforces", label = "STRATEGIC OPS" },
     { id = "readiness", label = "READINESS" },
@@ -167,7 +168,7 @@ local guides = {
     fleets = "Choose one fleet, configure its proven orders and response rules, or open Repair / Replace / Rebuild for native maintenance.",
     taskforces = "Manage Task Forces, carrier wings, defense grids, convoy escorts, mobile logistics, and coordinated assaults through native X4 assignments and exact readback.",
     readiness = "Missing and unknown evidence are blockers. No unknown value is counted as ready.",
-    academy = "Recruit up to 25 combined Pilot and Marine trainees, train them, then assign them to proven destinations.",
+    academy = "Recruit up to 100 combined Pilot and Marine trainees, train them, then assign them to proven destinations.",
     store = "Buy Pilot Lessons or Marine Credits with credits. Every purchase is verified before FOC reports success.",
     response = "Configure FOC Fleet Response scope, safeguards, dispatch limits, and return behavior.",
     activity = "Watch proven FOC actions as they happen, or review this session's bounded history.",
@@ -664,6 +665,7 @@ local function restorePersistentDrafts(rows)
             orders.returnHome = safeText(row[19], orders.returnHome)
             orders.manualOverride = row[20] == true or row[20] == 1 or row[20] == "1"
             orders.locked = row[21] == true or row[21] == 1 or row[21] == "1"
+            orders.shipyardReady = row[24] == true or row[24] == 1 or row[24] == '1'
             orders.nonCombatOverride = tonumber(row[1]) == 4 and (row[22] == true or row[22] == 1 or row[22] == "1")
             local home = {
                 id = safeText(row[4], "UNKNOWN"), text = safeText(row[5], "UNKNOWN SECTOR"),
@@ -676,6 +678,16 @@ local function restorePersistentDrafts(rows)
         end
     end
     return restored
+end
+
+-- One scalar, exact commander identity from completed MD assembly. Presentation only:
+-- preserve dirty editors and never redraw a closed/successor menu from this event.
+function menu.shipyardReady(_, id)
+    if type(id)~='string' or id=='' or id=='UNKNOWN' or #id>128 then return end
+    local key='COMMANDER_IDCODE:'..string.upper(id)
+    local orders=menu.ordersByFleet[key] or newFleetOrders()
+    orders.shipyardReady=true
+    menu.ordersByFleet[key]=orders
 end
 
 function menu.operationsMapLocationSelected(childMenu, request, value)
@@ -2003,6 +2015,29 @@ local function calculateRenderBudget(total, pageKey, options)
     return pageSize, pageCount, page, viewportCapacity, poolCapacity
 end
 
+function menu.shipyardRowUnits(captions)
+    local width=tonumber(menu.listContentWidth)
+    if not width or width<=0 or type(captions)~='table' then return nil end
+    local ok,units,fits=pcall(function()
+        local font=Helper.standardFont
+        local size=math.floor(Helper.scaleFont(font,Helper.standardFontSize))
+        local offset=Helper.scaleY(Helper.standardTextOffsety)
+        -- Same base pitch as calculateRenderBudget; charge the tallest actual
+        -- caption conservatively for every row, including buttons/dropdowns.
+        local pitch=math.max(Helper.scaleY(Helper.standardTextHeight),offset+math.ceil(C.GetTextHeight('Ag',font,size,0)))+Helper.borderSize
+        local height=math.max(pitch,Helper.scaleY(Helper.standardButtonHeight)+Helper.borderSize)
+        for _,c in ipairs(captions) do
+            local left=C.GetTextHeight(tostring(c[1]),font,size,math.floor(width*0.20))
+            local right=C.GetTextHeight(tostring(c[2]),font,size,math.floor(width*0.65))
+            height=math.max(height,offset+math.max(left,right)+Helper.borderSize)
+        end
+        local charged=math.max(1,math.ceil(height/math.max(1,pitch)))
+        local pixels=tonumber(menu.listContentHeight)
+        return charged,pixels and (charged+8)*pitch<=pixels and charged+8<=ROW_POOL_LIMIT-ROW_POOL_RESERVE-FIRST_DRAW_LIMBO_ROWS or false
+    end)
+    if ok and type(units)=='number' and units==units then return units,fits end
+end
+
 function menu.npcReviewFits(count, captions)
     if type(captions) ~= 'table' or #captions ~= count or count > 14 then return false end
     local width,height = tonumber(menu.listContentWidth),tonumber(menu.listContentHeight)
@@ -2063,21 +2098,21 @@ local function createHeader(frame, width)
     local tabHeight = Helper.scaleY(38)
     local feedbackHeight = Helper.scaleY(Helper.standardTextHeight + 8)
     local headerHeight = titleHeight + tabHeight + feedbackHeight
-    local header = frame:addTable(11, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
+    local header = frame:addTable(12, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize, borderEnabled = false })
     local title = header:addRow(true, { fixed = true })
     local screenTitle = menu.page == "fleets" and "FLEET ORDERS" or "PLAN CONTROL"
     local buildLabel = safeText(menu.param and menu.param[4], "FOC Build UNKNOWN"):gsub("^FOC%s+", ""):upper()
-    title[1]:setColSpan(8):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
-    title[9]:setColSpan(2):createButton({ active = true, bgColor = pointerActionBackground }):setText(menu.workflowPointersVisible and "CLEAR NEXT-STEP POINTERS" or "SHOW NEXT-STEP POINTERS", { halign = "center" })
-    title[9].handlers.onClick = function()
+    title[1]:setColSpan(9):createText("FLEET OPERATIONS COMMAND  |  " .. buildLabel .. "  |  " .. screenTitle, { font = Helper.headerFont, fontsize = Helper.standardFontSize + 4 })
+    title[10]:setColSpan(2):createButton({ active = true, bgColor = pointerActionBackground }):setText(menu.workflowPointersVisible and "CLEAR NEXT-STEP POINTERS" or "SHOW NEXT-STEP POINTERS", { halign = "center" })
+    title[10].handlers.onClick = function()
         menu.workflowPointersVisible = not menu.workflowPointersVisible
         menu.notice = menu.workflowPointersVisible and "NEXT-STEP POINTERS ARE NOW SHOWN" or "NEXT-STEP POINTERS ARE NOW HIDDEN"
         menu.plan.lastResult = menu.notice
         menu.plan.lastState = "DISPLAY_UPDATED"
         rebuild(false)
     end
-    title[11]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
-    title[11].handlers.onClick = function() menu.onCloseElement("close") end
+    title[12]:createButton({ active = true }):setText("CLOSE", { halign = "center" })
+    title[12].handlers.onClick = function() menu.onCloseElement("close") end
     local tabRow = header:addRow(true, { fixed = true })
     for index, tab in ipairs(tabs) do
         local properties = { active = true }
@@ -2092,13 +2127,18 @@ local function createHeader(frame, width)
             end
             menu.page = tab.id
             menu.activeTab = tab.id
+            if tab.id == 'shipyard' and not FOC_Advisor.data and not FOC_Advisor.started then FOC_Advisor.refresh() end
             if tab.id == "taskforces" then AddUITriggeredEvent(menu.name, "strategic_refresh", nil) end
             rebuild(true)
         end
     end
-    tabRow[11]:createButton({ active = not menu.pendingActionKind and not menu.carrierTransaction }):setText("REFRESH", { halign = "center" })
-    tabRow[11].handlers.onClick = function()
+    tabRow[12]:createButton({ active = not menu.pendingActionKind and not menu.carrierTransaction }):setText("REFRESH", { halign = "center" })
+    tabRow[12].handlers.onClick = function()
         if menu.pendingActionKind or menu.carrierTransaction then return end
+        if menu.page == 'shipyard' then
+            if not FOC_Shipyard.busy() then FOC_Advisor.refresh(); FOC_Advisor.ships=nil; FOC_Shipyard.stage='START' end
+            rebuild(false);return
+        end
         if menu.page == "taskforces" and menu.strategic.view == "COVERAGE AND FLEET TEMPLATES" and not FOC_Advisor.saving then FOC_Advisor.refresh() end
         if menu.page == "taskforces" then
             menu.strategicSnapshotStatus = "REQUESTED"
@@ -2114,7 +2154,7 @@ local function createHeader(frame, width)
     local feedbackRow = header:addRow(false, { fixed = true })
     local feedback = menu.notice or "READY - CHOOSE AN ACTION"
     if #feedback > 180 then feedback = feedback:sub(1, 177) .. "..." end
-    feedbackRow[1]:setColSpan(11):createText("LAST ACTION: " .. feedback, {
+    feedbackRow[1]:setColSpan(12):createText("LAST ACTION: " .. feedback, {
         halign = "center",
         color = needsAction(feedback) and warningColor or passColor,
     })
@@ -2130,6 +2170,19 @@ local function pageGuide(tableWidget)
 end
 
 local function commandPage(tableWidget)
+    if not menu.homeAdvanced then
+        section(tableWidget,'WHAT WOULD YOU LIKE TO DO?')
+        actionRow(tableWidget,'Build','HOW DO I BUILD A NEW TASK FORCE?',function()
+            menu.page='shipyard';menu.activeTab='shipyard'
+            if not FOC_Advisor.data and not FOC_Advisor.started then FOC_Advisor.refresh() end
+            rebuild(true)
+        end,true,passColor)
+        actionRow(tableWidget,'Assign','HOW DO I GIVE A FLEET A HOME AND MISSION?',function() menu.page='fleets';menu.activeTab='fleets';rebuild(true) end,true,passColor)
+        actionRow(tableWidget,'Maintain','WHICH SHIPS NEED ATTENTION?',function() menu.page='readiness';menu.activeTab='readiness';rebuild(true) end,true,passColor)
+        actionRow(tableWidget,'Command','REVIEW AUTOMATION AND FLEET STATUS',function() menu.homeAdvanced=true;rebuild(true) end,true,headingColor)
+        return
+    end
+    actionRow(tableWidget,'Home','BACK TO HOME QUESTIONS',function() menu.homeAdvanced=false;rebuild(true) end,true,passColor)
     local sample = menu.sample
     section(tableWidget, "FLEET STATUS")
     textRow(tableWidget, "Known fleet commanders", tostring(#sample.fleets))
@@ -2716,22 +2769,36 @@ function menu.assaultPage(tableWidget)
     actionRow(tableWidget, "Abort / withdraw", "ABORT RETAINED FOC ORDERS AND RETURN TO SAVED POSTS", function() menu.strategicAction("ASSAULT_ABORT", tostring(force[1]), {}) end, not menu.pendingActionKind, criticalColor)
 end
 
+function menu.advisorWorkspaceActive()
+    return menu.shown == true and not menu.minimized and menu.frame ~= nil and not menu.closeInProgress and (menu.page == 'shipyard' or (menu.page == 'taskforces' and menu.strategic.view == 'COVERAGE AND FLEET TEMPLATES'))
+end
+function menu.bindAdvisor()
+    FOC_Advisor.onChange=function() menu.advisorRedraw=true end
+    FOC_Advisor.resetDetailPage=function() menu.listPages['advisor.detail']=1 end
+    FOC_Advisor.fitReview=menu.npcReviewFits
+    FOC_Advisor.shipyardRowUnits=menu.shipyardRowUnits
+    FOC_Advisor.showPointers=function() return menu.workflowPointersVisible end
+    FOC_Advisor.isCurrent=function(w) return menu.advisorWorkspaceActive() and menu.mainTable==w end
+    FOC_Advisor.openSector=menu.openAdvisorSector
+    FOC_Advisor.purchaseEpoch=menu.purchaseEpoch
+    FOC_Advisor.purchaseContextActive=function(epoch) return epoch==menu.purchaseEpoch and menu.advisorWorkspaceActive() end
+    FOC_Advisor.openPurchase=function(yard)
+        if not menu.advisorWorkspaceActive() then return end
+        openNativeMenu('ShipConfigurationMenu',{0,0,yard,'purchase',{}})
+    end
+end
+function menu.shipyardPage(tableWidget)
+    menu.bindAdvisor()
+    FOC_Shipyard.render(tableWidget,actionRow,textRow,dropdownRow,passColor,warningColor,addPager,function()
+        menu.page='fleets';menu.activeTab='fleets';rebuild(true)
+    end)
+end
 function menu.taskForcesPage(tableWidget)
     section(tableWidget, "STRATEGIC OPERATIONS")
     dropdownRow(tableWidget, "Choose an operation", menu.strategicViews, menu.strategic.view, function(value) menu.strategic.view = tostring(value); rebuild(true) end)
     actionRow(tableWidget, "Evidence", "REFRESH STRATEGIC EVIDENCE | " .. (menu.strategicSnapshotStatus or "NOT REFRESHED"), function() menu.strategicSnapshotStatus = "REQUESTED"; AddUITriggeredEvent(menu.name, "strategic_refresh", nil); rebuild(false) end, not menu.pendingActionKind, headingColor, true)
     if menu.strategic.view == "COVERAGE AND FLEET TEMPLATES" then
-        FOC_Advisor.onChange = function() menu.advisorRedraw = true end
-        FOC_Advisor.resetDetailPage = function() menu.listPages['advisor.detail'] = 1 end
-        FOC_Advisor.fitReview = menu.npcReviewFits
-        FOC_Advisor.isCurrent = function(w) return menu.shown == true and not menu.minimized and menu.frame ~= nil and not menu.closeInProgress and menu.mainTable == w and menu.page == "taskforces" and menu.strategic.view == "COVERAGE AND FLEET TEMPLATES" end
-        FOC_Advisor.openSector = menu.openAdvisorSector
-        FOC_Advisor.purchaseEpoch = menu.purchaseEpoch
-        FOC_Advisor.purchaseContextActive = function(epoch) return epoch == menu.purchaseEpoch and menu.frame ~= nil and not menu.closeInProgress and menu.page == 'taskforces' and menu.strategic.view == 'COVERAGE AND FLEET TEMPLATES' end
-        FOC_Advisor.openPurchase = function(yard)
-            if menu.page ~= 'taskforces' or menu.strategic.view ~= 'COVERAGE AND FLEET TEMPLATES' then return end
-            openNativeMenu('ShipConfigurationMenu', { 0, 0, yard, 'purchase', {} })
-        end
+        menu.bindAdvisor()
         FOC_Advisor.render(tableWidget, actionRow, textRow, dropdownRow, passColor, warningColor, addPager)
     elseif menu.strategic.view == "TASK FORCES" then taskForcesLegacyPage(tableWidget)
     elseif menu.strategic.view == "CARRIER AIR WINGS" then
@@ -2853,6 +2920,7 @@ local function fleetOrdersPane(tableWidget)
         local savedDraft = menu.draftsByFleet[selectedFleetKey]
         local activeConfirmed = menu.lastActivePatrolFleet == selectedFleetKey and menu.plan.lastState == "FLEET_PATROL_ACTIVE"
         local patrolStatus = patrolPending and "WAITING FOR X4 ACTIVE-ORDER READBACK" or activeConfirmed and "PATROL ACTIVE - DISTRESS RESPONSE ARMED" or savedDraft and "SETTINGS SAVED - ACTIVE PATROL NOT CONFIRMED THIS SESSION" or "NOT ACTIVE YET - CONFIGURE THIS FLEET AND PRESS SEND"
+        if orders.shipyardReady and orders.locked and not patrolPending and not activeConfirmed then patrolStatus='READY FOR ASSIGNMENT - choose Home and mission, then Send. Gathering arrival is not confirmed here.' end
         textRow(tableWidget, "Fleet status", patrolStatus, activeConfirmed and passColor or warningColor)
         textRow(tableWidget, "Hard safety", "Player control, mission/story protection, missing pilot or Home, non-combat scope, and critical non-cancelable orders still block the send.", passColor)
 
@@ -3092,8 +3160,8 @@ local function academyPage(tableWidget)
     end
 
     section(tableWidget, "TRAINING ACADEMY")
-    textRow(tableWidget, "Purpose", "Maintain one shared station-based reserve. Every retained trainee can receive Pilot or Marine training, then be assigned under the selected focus. The roster can never exceed 25 NPCs.", headingColor)
-    textRow(tableWidget, "Capacity", tostring(#academy.rows) .. " / 25 SHARED TRAINEES | AVAILABLE TO PILOT AND MARINE", #academy.rows < 25 and warningColor or passColor)
+    textRow(tableWidget, "Purpose", "Maintain one shared station-based reserve. Every retained trainee can receive Pilot or Marine training, then be assigned under the selected focus. The roster can never exceed 100 NPCs.", headingColor)
+    textRow(tableWidget, "Capacity", tostring(#academy.rows) .. " / 100 SHARED TRAINEES | AVAILABLE TO PILOT AND MARINE", #academy.rows < 100 and warningColor or passColor)
     dropdownRow(tableWidget, "Training focus", { "PILOT", "MARINE" }, track, function(value)
         academy.recruitTrack = value == "MARINE" and "MARINE" or "PILOT"
         local rows = academyRowsForTrack(academy.recruitTrack)
@@ -3104,10 +3172,10 @@ local function academyPage(tableWidget)
     actionRow(tableWidget, "Recruitment", "PREVIEW RECRUITMENT", function()
         academy.previewRecruitTrack = academy.recruitTrack
         auditAction("ACADEMY_PREVIEW_RECRUIT", academy.recruitTrack, academy.recruitTrack .. " RECRUITMENT PREVIEW REQUESTED - NOTHING CHANGED", "ACADEMY_PREVIEW_PENDING")
-    end, #academy.rows < 25 and menu.pendingActionKind == nil, headingColor)
+    end, #academy.rows < 100 and menu.pendingActionKind == nil, headingColor)
     actionRow(tableWidget, "Recruitment", "APPROVE ONE " .. academy.recruitTrack .. " TRAINEE", function()
         auditAction("ACADEMY_RECRUIT", academy.recruitTrack, academy.recruitTrack .. " RECRUITMENT REQUEST SENT - NATIVE ROSTER READBACK REQUIRED", "ACADEMY_RECRUIT_PENDING")
-    end, menu.plan.lastState == "ACADEMY_RECRUIT_READY" and academy.previewRecruitTrack == academy.recruitTrack and #academy.rows < 25 and menu.pendingActionKind == nil, warningColor)
+    end, menu.plan.lastState == "ACADEMY_RECRUIT_READY" and academy.previewRecruitTrack == academy.recruitTrack and #academy.rows < 100 and menu.pendingActionKind == nil, warningColor)
 
     section(tableWidget, "SELECT " .. track .. " TRAINEE")
     if #trackRows == 0 then
@@ -3300,6 +3368,12 @@ local function responsePage(tableWidget)
 end
 
 local function settingsPage(tableWidget)
+    if FOCCapture then
+        FOCCapture.onPolicy=function()
+            if menu.shown == true and not menu.minimized and menu.frame and not menu.closeInProgress and menu.page == "settings" and not menu.recoveryDropdown then rebuild(false) end
+        end
+        FOCCapture.render(tableWidget,actionRow,textRow,passColor,warningColor)
+    end
     if FOCRecovery then
         FOCRecovery.onPolicy = function()
             if menu.frame and menu.page == "settings" and not menu.recoveryDropdown then rebuild(false) end
@@ -3575,8 +3649,9 @@ function menu.create()
     configureColumns(tableWidget, contentWidth)
     tableWidget.properties.maxVisibleHeight = contentHeight
     menu.mainTable = tableWidget
-    if not (menu.page == 'taskforces' and menu.strategic.view == 'COVERAGE AND FLEET TEMPLATES' and (FOC_Advisor.step == 'NPC' or FOC_Advisor.step == 'PROCUREMENT')) then pageGuide(tableWidget) end
+    if menu.page ~= 'shipyard' and menu.page ~= 'command' and not (menu.page == 'taskforces' and menu.strategic.view == 'COVERAGE AND FLEET TEMPLATES' and (FOC_Advisor.step == 'NPC' or FOC_Advisor.step == 'PROCUREMENT')) then pageGuide(tableWidget) end
     if menu.page == "command" then commandPage(tableWidget)
+    elseif menu.page == 'shipyard' then menu.shipyardPage(tableWidget)
     elseif menu.page == "taskforces" then menu.taskForcesPage(tableWidget)
     elseif menu.page == "readiness" then readinessPage(tableWidget)
     elseif menu.page == "academy" then academyPage(tableWidget)
@@ -3715,8 +3790,9 @@ function menu.onUpdate()
         menu.planRedraw = false
         rebuild(false)
     end
-    if menu.frame and not menu.closeInProgress and not menu.recoveryDropdown and menu.page == "taskforces" and menu.strategic.view == "COVERAGE AND FLEET TEMPLATES" then
+    if menu.advisorWorkspaceActive() and not menu.recoveryDropdown then
         FOC_Advisor.tick()
+        if menu.page == 'shipyard' then FOC_Shipyard.tick() end
         if menu.advisorRedraw then menu.advisorRedraw=nil; rebuild(false) end
     end
     if menu.frame and not menu.closeInProgress and not menu.recoveryDropdown and (menu.feedbackRedraw or menu.deferredRedraw) then
@@ -3860,6 +3936,7 @@ local function init()
         DebugError("[FOC][B048][LUA_ERROR] Helper.registerMenu unavailable")
     end
     RegisterEvent(menu.name .. ".draft.key", draftKeyReceived)
+    RegisterEvent(menu.name .. ".shipyard.ready", menu.shipyardReady)
     RegisterEvent(menu.name .. ".draft.result", draftResultReceived)
     RegisterEvent(menu.name .. ".draft.state", draftStateReceived)
     RegisterEvent(menu.name .. ".draft.complete", draftSaveComplete)

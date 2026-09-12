@@ -66,54 +66,70 @@
      <set_value name="$valid" exact="$template and $home and $home.exists and $home.isclass.sector"/>
      <do_if value="$valid"><set_value name="$valid" exact="@$template.$home.exists and $template.$home == $home"/></do_if>
     </do_if>
-    <set_value name="$entries" exact="[]"/><set_value name="$total" exact="0"/><set_value name="$examined" exact="0"/>
+    <set_value name="$entries" exact="[]"/><set_value name="$total" exact="0"/>
+    <set_value name="$allocations" exact="[]"/><set_value name="$composition" exact="[]"/>
     <do_if value="$valid">
      <set_value name="$valid" exact="$template.$entries.count ge 1 and $template.$entries.count le 8"/>
      <find_station_by_true_owner name="$yards" faction="faction.player" space="player.galaxy" canbuildships="true" canbuildfor="faction.player" hascontrolentity="controlpost.shiptrader" multiple="true"/>
-     <set_value name="$reason" exact="'Fleet entries or yard scan exceed the supported bounds.'"/>
+     <set_value name="$reason" exact="'Saved composition must contain one to eight ship entries.'"/>
      <do_if value="$yards.count == 0"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'No player-owned shipbuilding yard with a ship trader was found. Review the saved fleet and use its NPC purchase option.'"/></do_if>
-     <do_if value="$yards.count gt 128"><set_value name="$valid" exact="false"/></do_if>
+     <do_if value="$yards.count gt 128"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'More than 128 eligible owned yards found; construction review cannot safely compare all yards.'"/></do_if>
      <do_if value="$valid">
       <do_for_each name="$e" in="$template.$entries">
        <set_value name="$total" operation="add" exact="$e.$amount"/>
-       <do_if value="$e.$amount lt 1 or $e.$amount gt 100 or $e.$amount != ($e.$amount)i or $total gt 100"><set_value name="$valid" exact="false"/></do_if>
+       <do_if value="$e.$amount lt 1 or $e.$amount gt 100 or $e.$amount != ($e.$amount)i or $total gt 100"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'Whole ship quantities from 1 to 100 and at most 100 ships per fleet are required.'"/></do_if>
        <set_value name="$best" exact="null"/><set_value name="$distance" exact="999999"/>
+       <set_value name="$options" exact="[]"/>
+       <append_to_list name="$composition" exact="table[$macro=$e.$macro,$amount=$e.$amount]"/>
        <set_value name="$seenhull" exact="false"/><set_value name="$blueprint" exact="false"/><set_value name="$compatible" exact="false"/><set_value name="$reachable" exact="false"/><set_value name="$loadoutok" exact="false"/>
        <do_if value="$valid">
-        <do_for_each name="$yard" in="$yards">
-         <do_if value="$valid and $yard.isoperational and $yard.buildmodules.count le 32">
-          <do_for_each name="$module" in="$yard.buildmodules">
-           <do_if value="$valid and $module.buildmacros.count le 2048 and $examined + $module.buildmacros.count le 8192">
-            <set_value name="$examined" operation="add" exact="$module.buildmacros.count"/>
-            <do_for_each name="$macro" in="$module.buildmacros">
-             <do_if value="$macro.id == $e.$macro">
-              <set_value name="$seenhull" exact="true"/>
-              <do_if value="player.blueprints.{$macro.ware}.any.exists"><set_value name="$blueprint" exact="true"/></do_if>
-             </do_if>
-             <do_if value="$macro.id == $e.$macro and $macro.primarypurpose == purpose.fight and player.blueprints.{$macro.ware}.any.exists and $yard.canbuildmacro.{$macro}">
+        <!-- Query only requested hulls: at most 8 entries x 128 yards.
+             Catalogue/module size is not a fleet-size or buildability limit. -->
+        <set_value name="$macro" exact="@macro.{$e.$macro}"/>
+        <do_if value="not $macro"><set_value name="$valid" exact="false"/><set_value name="$reason" exact="'%1: saved ship is unavailable; review the composition.'.[$e.$macro]"/></do_if>
+        <do_else>
+         <do_for_each name="$yard" in="$yards">
+          <do_if value="$yard.exists and $yard.owner == faction.player and $yard.isoperational and $yard.canbuildmacro.{$macro}">
+           <set_value name="$seenhull" exact="true"/>
+           <do_if value="player.blueprints.{$macro.ware}.any.exists"><set_value name="$blueprint" exact="true"/></do_if>
+           <do_if value="($macro.primarypurpose == purpose.fight or (@$template.$shipyard == 1 and $e.$macro == @$template.$supportmacro)) and $blueprint">
               <set_value name="$compatible" exact="true"/>
               <set_value name="$d" exact="$yard.gatedistance.{$home}"/>
-              <do_if value="$d ge 0 and $d lt $distance">
+              <do_if value="$d ge 0">
                <set_value name="$reachable" exact="true"/>
                <remove_value name="$loads"/><generate_loadout macro="$macro" faction="faction.player" level="0.5" variation="0" requireblueprints="true" result="$loads"/>
                <do_if value="@$loads.count == 1 and $loads.{1}.wares.list.count gt 0">
                 <set_value name="$loadoutok" exact="true"/>
                 <set_value name="$missing" exact="$yard.missingloadoutequipment.{$loads.{1}}.{faction.player}.list"/>
-                <do_if value="$missing.count == 0"><set_value name="$best" exact="table[$yard=$yard,$macro=$macro,$loadout=$loads.{1},$amount=$e.$amount]"/><set_value name="$distance" exact="$d"/></do_if>
+                <do_if value="$missing.count == 0">
+                 <set_value name="$allocation" exact="null"/>
+                 <do_for_each name="$a" in="$allocations"><do_if value="$a.$yard == $yard"><set_value name="$allocation" exact="$a"/></do_if></do_for_each>
+                 <do_if value="not $allocation"><set_value name="$allocation" exact="table[$yard=$yard,$amount=0]"/><append_to_list name="$allocations" exact="$allocation"/></do_if>
+                 <append_to_list name="$options" exact="table[$yard=$yard,$macro=$macro,$loadout=$loads.{1},$distance=$d,$allocation=$allocation]"/>
+                </do_if>
                </do_if>
               </do_if>
-             </do_if>
-            </do_for_each>
            </do_if>
-           <do_else><set_value name="$valid" exact="false"/></do_else>
-          </do_for_each>
-         </do_if>
-         <do_elseif value="$yard.buildmodules.count gt 32"><set_value name="$valid" exact="false"/></do_elseif>
-        </do_for_each>
+          </do_if>
+         </do_for_each>
+        </do_else>
        </do_if>
-       <do_if value="$best"><append_to_list name="$entries" exact="$best"/></do_if>
+       <!-- One explicit allocation per ship. Balance this order across eligible
+            yards; distance breaks ties. Existing native queues/resources can
+            still delay construction, so this is not an optimal-time claim. -->
+       <do_if value="$valid and $options.count gt 0">
+        <do_all exact="$e.$amount">
+         <set_value name="$best" exact="null"/>
+         <do_for_each name="$option" in="$options">
+          <do_if value="not $best"><set_value name="$best" exact="$option"/></do_if>
+          <do_elseif value="$option.$allocation.$amount lt $best.$allocation.$amount or ($option.$allocation.$amount == $best.$allocation.$amount and $option.$distance lt $best.$distance)"><set_value name="$best" exact="$option"/></do_elseif>
+         </do_for_each>
+         <append_to_list name="$entries" exact="table[$yard=$best.$yard,$macro=$best.$macro,$loadout=$best.$loadout,$amount=1]"/>
+         <set_value name="$best.$allocation.$amount" operation="add" exact="1"/>
+        </do_all>
+       </do_if>
        <do_elseif value="$valid">
-        <set_value name="$reason" exact="'%1: %2'.[$e.$macro,if not $seenhull then 'No operational owned yard offers this hull. Review its NPC supplier.' else if not $blueprint then 'Ship blueprint is not owned. Buy the blueprint in X4 or review an NPC supplier.' else if not $compatible then 'Owned yard cannot currently build this combat hull.' else if not $reachable then 'No eligible yard has a known gate route to Home.' else if not $loadoutok then 'No owned-blueprint medium equipment preset could be generated.' else 'Required preset equipment is unavailable at the eligible yards.']"/>
+        <set_value name="$reason" exact="'%1: %2'.[$e.$macro,if not $seenhull then 'No operational owned yard offers this ship. Review its NPC supplier.' else if not $blueprint then 'Ship blueprint is not owned. Buy the blueprint in X4 or review an NPC supplier.' else if not $compatible then 'Owned yard cannot currently build this combat ship.' else if not $reachable then 'No eligible yard has a known gate route to Home.' else if not $loadoutok then 'No owned-blueprint medium equipment preset could be generated.' else 'Required preset equipment is unavailable at the eligible yards.']"/>
         <set_value name="$valid" exact="false"/>
        </do_elseif>
       </do_for_each>
@@ -121,11 +137,12 @@
     </do_if>
     <raise_lua_event name="'FOC_Construction.request'" param="@$p.{1}"/>
     <raise_lua_event name="'FOC_Construction.job'" param="0"/>
-    <do_if value="$valid and $entries.count == $template.$entries.count">
-     <set_value name="global.$JKFOC_ConstructionPreview" exact="table[$token=global.$JKFOC_ConstructionNext,$template=$template,$home=$home,$homekey=$p.{4},$entries=$entries,$total=$total,$time=player.age]"/>
+    <do_if value="$valid and $entries.count == $total and $total ge 1 and $total le 100">
+     <set_value name="$yardcount" exact="0"/><do_for_each name="$allocation" in="$allocations"><do_if value="$allocation.$amount gt 0"><set_value name="$yardcount" operation="add" exact="1"/></do_if></do_for_each>
+     <set_value name="global.$JKFOC_ConstructionPreview" exact="table[$schema=2,$token=global.$JKFOC_ConstructionNext,$template=$template,$composition=$composition,$home=$home,$homekey=$p.{4},$entries=$entries,$total=$total,$yardcount=$yardcount,$time=player.age]"/>
      <set_value name="global.$JKFOC_ConstructionNext" operation="add" exact="1"/>
      <raise_lua_event name="'FOC_Construction.token'" param="global.$JKFOC_ConstructionPreview.$token"/>
-     <raise_lua_event name="'FOC_Construction.result'" param="'%1: build %2 ships with owned-blueprint medium loadouts and normal resources. First listed hull leads; others defend it. Assemble and patrol Home: %3 after delivery. Nothing ordered yet.'.[$template.$name,$total,$home.knownname]"/>
+     <raise_lua_event name="'FOC_Construction.result'" param="if @$template.$shipyard == 1 then '%1: build %2 ships across %4 eligible owned yard(s) with owned-blueprint medium loadouts and normal resources. First ship leads, escorts defend, selected auxiliary supplies fleet. Gather at %3 and wait for assignment. Supplies not purchased; arrival not confirmed. Nothing ordered yet.'.[$template.$name,$total,$home.knownname,$yardcount] else '%1: build %2 ships across %4 eligible owned yard(s) with owned-blueprint medium loadouts and normal resources. First listed ship leads; others defend it. Assemble and patrol Home: %3 after delivery. Nothing ordered yet.'.[$template.$name,$total,$home.knownname,$yardcount]"/>
     </do_if>
     <do_else><raise_lua_event name="'FOC_Construction.token'" param="0"/><raise_lua_event name="'FOC_Construction.result'" param="(if global.$JKFOC_ConstructionJobs.count ge 20 then 'Construction tracking is full (20 jobs).' else $reason) + ' Nothing ordered.'"/></do_else>
     <raise_lua_event name="'FOC_Construction.complete'"/>
@@ -140,7 +157,9 @@
     <set_value name="$plan" exact="@global.$JKFOC_ConstructionPreview"/>
     <set_value name="$valid" exact="@$p.count == 2 and $plan and @$plan.$token == $p.{2} and global.$JKFOC_ConstructionJobs.count lt 20 and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
     <do_if value="$valid">
-     <set_value name="$valid" exact="player.age ge $plan.$time and player.age - $plan.$time le 120s and $plan.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$plan.$template}"/>
+     <set_value name="$valid" exact="@$plan.$schema == 2 and player.age ge $plan.$time and player.age - $plan.$time le 120s and $plan.$home.exists and global.$JKFOC_AdvisorTemplates.indexof.{$plan.$template} and @$plan.$template.$home == $plan.$home and $plan.$entries.count == $plan.$total and $plan.$total ge 1 and $plan.$total le 100 and $plan.$composition.count == $plan.$template.$entries.count"/>
+     <do_for_each name="$original" in="$plan.$composition" counter="$ci"><do_if value="@$plan.$template.$entries.{$ci}.$macro != $original.$macro or @$plan.$template.$entries.{$ci}.$amount != $original.$amount"><set_value name="$valid" exact="false"/></do_if></do_for_each>
+     <set_value name="$conflictcheck" exact="table[$template=$plan.$template]"/><signal_cue_instantly cue="md.FOC_Procurement.Purchase_Conflict" param="$conflictcheck"/><set_value name="$valid" exact="$valid and $conflictcheck.$valid"/>
      <do_for_each name="$job" in="global.$JKFOC_ConstructionJobs"><do_if value="$job.$template == $plan.$template"><set_value name="$valid" exact="false"/></do_if></do_for_each>
      <do_for_each name="$e" in="$plan.$entries">
       <do_if value="not $e.$yard.exists or not $e.$yard.isoperational or $e.$yard.owner != faction.player or not $e.$yard.canbuildmacro.{$e.$macro} or not player.blueprints.{$e.$macro.ware}.any.exists"><set_value name="$valid" exact="false"/></do_if>

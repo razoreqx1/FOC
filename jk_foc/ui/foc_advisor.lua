@@ -68,12 +68,13 @@ function A.commit()
                     local want = A.saving.entries[i]
                     if e.macro ~= want.macro or e.amount ~= want.amount then same = false end
                 end
-                if same and tostring(t.home or '0') == A.saving.home then match = true end
+                if same and tostring(t.home or '0') == A.saving.home and (tonumber(t.shipyard) or 0)==A.saving.shipyard and (t.supportmacro or '')==A.saving.supportmacro then match = true end
             end
         end
         A.status = match and 'Template saved and read back. No ships ordered and no credits spent.' or 'Template save was not confirmed; your draft is retained.'
         A.saving = nil
         if match and A.step == 'DRAFT' then A.go('SAVED') end
+        if A.onSaved then A.onSaved(match) end
     end
     A.changed()
 end
@@ -85,7 +86,7 @@ end)
 RegisterEvent('FOC_Advisor.expected', function(_, value) if A.pending then A.pending.expected = tonumber(value) end end)
 RegisterEvent('FOC_Advisor.clock', function(_, value) if A.pending then A.pending.time = tonumber(value) end end)
 RegisterEvent('FOC_Advisor.row', function(_, kind) if A.pending then if A.pending.row then A.pending.invalid=true end; A.pending.row = { kind = kind } end end)
-for _, field in ipairs({ 'id', 'name', 'sector', 'sectorname', 'time', 'owned', 'macro', 'amount', 'parent', 'attackerclass', 'home', 'homename' }) do
+for _, field in ipairs({ 'id', 'name', 'sector', 'sectorname', 'time', 'owned', 'macro', 'amount', 'parent', 'attackerclass', 'home', 'homename', 'shipyard', 'supportmacro', 'workup' }) do
     RegisterEvent('FOC_Advisor.' .. field, function(_, value)
         if A.pending and A.pending.row then
             if A.pending.row[field]~=nil then A.pending.invalid=true end
@@ -112,6 +113,9 @@ RegisterEvent('FOC_Advisor.rowcommit', function()
     elseif r.kind == 'template' then
         local key = tostring(r.id)
         if not r.id or not r.name or p.byTemplate[key] then p.invalid = true; return end
+        if r.shipyard ~= nil and tonumber(r.shipyard) ~= 0 and tonumber(r.shipyard) ~= 1 then p.invalid=true;return end
+        if r.supportmacro ~= nil and type(r.supportmacro) ~= 'string' then p.invalid=true;return end
+        if tonumber(r.shipyard)==1 and type(r.supportmacro) ~= 'string' then p.invalid=true;return end
         if r.home ~= nil then
             r.home=tostring(r.home):gsub('ULL$',''):gsub('LL$','')
             if not r.home:match('^%d+$') or type(r.homename)~='string' then p.invalid=true;return end
@@ -217,9 +221,9 @@ function A.catalogue()
             assert(type(list) == 'table', 'Ship catalogue unavailable')
             for _, entry in ipairs(list) do
                 local macro = tostring(entry.id)
-                if not seen[macro] and GetMacroData(macro, 'primarypurpose') == 'fight' then
+                if not seen[macro] and (GetMacroData(macro, 'primarypurpose') == 'fight' or (A.shipyardMode and GetMacroData(macro, 'shiptype') == 'resupplier')) then
                     seen[macro] = true
-                    rows[#rows+1] = { macro = macro, name = GetMacroData(macro, 'name') or macro, owned = owned[macro] == true, class = library, route = 'No known compatible seller or owned yard found' }
+                    rows[#rows+1] = { macro = macro, support = GetMacroData(macro,'shiptype')=='resupplier', name = GetMacroData(macro, 'name') or macro, owned = owned[macro] == true, class = library, route = 'No known compatible seller or owned yard found', npcreason='No known NPC yard offers this hull', ownreason='No compatible player yard or blueprint found' }
                 end
             end
         end
@@ -244,12 +248,21 @@ function A.catalogue()
         table.sort(yards, function(a,b) if a.owned ~= b.owned then return a.owned end; return tostring(a.id)<tostring(b.id) end)
         for _, row in ipairs(rows) do
             for _, yard in ipairs(yards) do
-                if yard.macros[row.macro] and (not yard.owned or row.owned) and C.CanGenerateValidLoadout(yard.id, row.macro) then
+                if yard.macros[row.macro] then
+                    local reasonKey=yard.owned and 'ownreason' or 'npcreason'
+                    if yard.owned and not row.owned then row[reasonKey]='Player blueprint not owned'
+                    elseif not C.CanGenerateValidLoadout(yard.id,row.macro) then row[reasonKey]='Compatible loadout unavailable at '..yard.name
+                    else
                     local allowed,reason=A.eligibility(row.macro,yard.id,yard.owned)
                     if allowed then
                         if not row.yard then row.yard=tostring(yard.id);row.route=(yard.owned and 'BUILD at ' or 'BUY from ')..yard.name end
                         if not yard.owned and not row.npcyard then row.npcyard=tostring(yard.id);row.npcname=yard.name end
-                    elseif not row.yard then row.route=reason end
+                        if yard.owned then
+                            row.ownyards=row.ownyards or {};row.ownyards[#row.ownyards+1]={id=tostring(yard.id),name=yard.name}
+                            if not row.ownyard then row.ownyard=tostring(yard.id);row.ownname=yard.name end
+                        end
+                    else row[reasonKey]=reason;if not row.yard then row.route=reason end end
+                    end
                 end
             end
         end
@@ -258,6 +271,18 @@ function A.catalogue()
     if ok then A.ships = result; A.page = 1; A.queue = { index = 1 }; A.status = 'Comparing the catalogue once, one hull at a time. Leaving this workspace pauses the comparison.'
     else A.ships=nil;A.chosen=nil;A.queue=nil;A.status = 'Catalogue unavailable: ' .. tostring(result) end
     A.changed()
+end
+-- Route availability is separate from composition identity and purchase consent.
+function A.routeStatus(route)
+    if #A.draft==0 then return false,'Choose a flagship first.' end
+    for _,entry in ipairs(A.draft) do
+        local row;for _,r in ipairs(A.ships or {}) do if r.macro==entry.macro then row=r;break end end
+        local key=route=='NPC' and 'npcyard' or 'ownyard'
+        if not row or not (row[key] or route=='MIXED' and row.npcyard) then
+            return false,(row and row.name or entry.macro)..': '..(row and (route=='NPC' and row.npcreason or row.ownreason) or 'Refresh the ship catalogue.')
+        end
+    end
+    return true,route=='NPC' and 'NPC suppliers found for every ship.' or route=='MIXED' and 'Every ship has an NPC purchase or owned build route.' or 'Player yards and blueprints found for every ship.'
 end
 function A.analyse(row, quiet)
     local yard = A.component(row.yard)
@@ -367,10 +392,11 @@ function A.save()
     A.request = A.request + 1
     A.pending = nil
     packet[#packet+1]=home
-    A.saving = { name = packet[2], entries = entries, home=tostring(home) }
+    A.saving = { name = packet[2], entries = entries, home=tostring(home), shipyard=A.shipyardMode and 1 or 0, supportmacro=A.shipyardMode and (A.supportmacro or '') or '' }
     A.started = getElapsedTime()
     A.status = 'Saving template; waiting for complete readback...'
-    AddUITriggeredEvent('FOC_Advisor', 'save_v2', packet)
+    if A.shipyardMode then packet[#packet+1]=A.supportmacro or '' end
+    AddUITriggeredEvent('FOC_Advisor', A.shipyardMode and 'save_shipyard' or 'save_v2', packet)
 end
 
 function A.savedDraft()
@@ -378,7 +404,7 @@ function A.savedDraft()
         if t.name==(A.templateName or 'Response Fleet 1') and #t.entries==#A.draft then
             local same=true
             for i,e in ipairs(t.entries) do if e.macro~=A.draft[i].macro or e.amount~=A.draft[i].amount then same=false end end
-            if same and A.selected and tostring(t.home or '0')==tostring(A.component(A.selected.id)) then return t end
+            if same and A.selected and tostring(t.home or '0')==tostring(A.component(A.selected.id)) and (tonumber(t.shipyard) or 0)==(A.shipyardMode and 1 or 0) and (t.supportmacro or '')==(A.shipyardMode and (A.supportmacro or '') or '') then return t end
         end
     end
 end
@@ -425,6 +451,7 @@ function A.loadTemplate(t)
     if #A.draft>0 and not same then A.status='A different draft is open. Review it, then save or clear it before loading another fleet.';A.go('DRAFT');return false end
     A.draft={};for _,e in ipairs(t.entries) do A.draft[#A.draft+1]={macro=e.macro,amount=e.amount} end
     A.templateName=t.name
+    A.shipyardMode=tonumber(t.shipyard)==1;A.supportmacro=t.supportmacro or ''
     if A.component(t.home) then
         A.selected={id=t.home,name=t.homename};A.status='Loaded '..t.name..'. Home: '..t.homename..'. No ships ordered.';A.go('DRAFT')
     else
@@ -534,7 +561,7 @@ function A.render(w, realAction, realText, realDropdown, normal, warning, pager)
     text(w,'Purchase confirmation',FOC_Procurement and 'Review suppliers, actual medium equipment, quantities, Home and total in FOC. Only CONFIRM PURCHASE spends credits and authorizes assembly after delivery.' or 'Review equipment and costs in the native purchase screen.',normal)
     text(w,'Your fleet plan',tostring(#A.draft)..' ship types. Saved composition does not itself authorize a purchase.',normal)
     text(w,'Save behavior','Saving replaces the selected numbered template slot. No ship equipment or modifications are copied.',warning)
-    action(w,'New composition','CLEAR UNSAVED DRAFT - KEEP SAVED TEMPLATES',function()A.draft={};A.status='Draft cleared. Saved templates are unchanged. Open a saved fleet or select new ships.'end,not A.saving,warning)
+    action(w,'New composition','CLEAR UNSAVED DRAFT - KEEP SAVED TEMPLATES',function()A.draft={};A.shipyardMode=false;A.supportmacro='';A.ships=nil;A.queue=nil;A.status='Draft cleared. Saved templates are unchanged. Open a saved fleet or select new ships.'end,not A.saving,warning)
     action(w,'Saved plans','OPEN SAVED FLEET TEMPLATES',function()A.go('SAVED')end,true,normal)
     end
     if step == 'SAVED' then

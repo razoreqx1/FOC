@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.78 — Build 079
+
+- Added question-led Home and Shipyard task-force creation, reusable templates, S/M escorts and optional auxiliary support.
+- Added own-yard distribution and combined NPC/owned-yard orders. Select owned-yard construction to use only your stations; combined orders prefer NPC suppliers where available.
+- Added compatible saved loadouts, equipment-slot editing and service-crew/marine workup; Academy recruitment supports 100 personnel.
+- Added optional guarded capture attempts; success is not guaranteed.
+- Corrected the native service-crew role and guarded repair of exactly matched, unattempted saved requests.
+- Improved workflow pointers, visible template saving and own-yard messaging.
+
+
 ## v1.72 — Build 073
 
 - Fixed Academy list errors when a ship's sector is unavailable.

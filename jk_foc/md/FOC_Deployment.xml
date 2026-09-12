@@ -7,10 +7,12 @@
    <delay exact="1s"/>
    <actions>
     <set_value name="$job" exact="event.param"/>
+    <set_value name="$shipyard" exact="@$job.$template.$shipyard == 1"/>
     <set_value name="$npc" exact="@$job.$source == 'NPC' and @$job.$approved and @global.$JKFOC_NPCJobs.indexof.{$job}"/>
     <do_if value="$job.$deploymentattempted? and not $job.$deploymentattempted and (@global.$JKFOC_ConstructionJobs.indexof.{$job} or $npc)">
      <set_value name="$valid" exact="$job.$ships.count == $job.$total and $job.$total ge 1 and $job.$total le 100 and $job.$home.exists and global.$JKFOC_FleetDrafts? and global.$JKFOC_ProtectedShipIDs? and ['APPLY APPROVED PLAN','FULL AUTOMATION'].indexof.{@global.$JKFOC_Authority}"/>
      <set_value name="$job.$deploymentmessage" exact="'Awaiting complete delivery, native captains and unchanged ship orders.'"/>
+     <do_if value="$job.$crew? and not @$job.$crewready"><set_value name="$valid" exact="false"/><set_value name="$job.$deploymentmessage" exact="if $job.$crewmessage? then $job.$crewmessage else 'Awaiting requested crew.'"/></do_if>
      <set_value name="$seen" exact="[]"/>
      <do_for_each name="$e" in="$job.$ships">
       <set_value name="$ship" exact="@$e.$ship"/>
@@ -19,6 +21,7 @@
       <do_if value="$e.$state != 'DELIVERED' or not $ship or not $ship.exists"><set_value name="$valid" exact="false"/></do_if>
       <do_elseif value="$ship.owner != faction.player or not $ship.isoperational or $ship.macro != $e.$macro or $ship == player.controlled or not @$ship.assignedpilot.exists or $ship.ismission or global.$JKFOC_ProtectedShipIDs.indexof.{$ship.idcode} or $ship == @md.Story_Terraforming.Start.$BettyShip"><set_value name="$valid" exact="false"/></do_elseif>
       <do_else>
+       <do_if value="not $ship.orders? or $ship.orders.count != 0"><set_value name="$valid" exact="false"/><set_value name="$job.$deploymentmessage" exact="'Ship has queued work or its queue is unavailable. No assembly will replace it.'"/></do_if>
        <set_value name="$expectedorder" exact="@$e.$oldorder"/><set_value name="$expecteddefault" exact="@$e.$olddefault"/>
        <do_if value="$npc and @$job.$recovered and @$e.$recoveryorders"><set_value name="$expectedorder" exact="@$e.$recoveryorder"/><set_value name="$expecteddefault" exact="@$e.$recoverydefault"/>
         <do_if value="not $ship.orders? or $ship.orders.count != 0 or @$e.$recoveryholdfire != @$ship.defaultorder.$holdfire or @$e.$recoverytimeout != @$ship.defaultorder.$timeout or @$e.$recoveryallowdocked != @$ship.defaultorder.$allowdocked"><set_value name="$valid" exact="false"/><set_value name="$job.$deploymentmessage" exact="'Reviewed order queue or default parameters changed. Fleet left unassembled.'"/></do_if>
@@ -28,6 +31,20 @@
      </do_for_each>
      <do_if value="$valid">
       <set_value name="$leader" exact="$job.$ships.{1}.$ship"/>
+      <do_if value="$shipyard">
+       <do_if value="@$job.$template.$schema != 3 or $leader.macro.id != $job.$template.$entries.{1}.$macro or $leader.primarypurpose != purpose.fight"><set_value name="$valid" exact="false"/></do_if>
+       <set_value name="$supportcount" exact="0"/>
+       <do_for_each name="$e" in="$job.$ships" counter="$i">
+        <do_if value="$i gt 1">
+         <set_value name="$role" exact="if $e.$macro.id == @$job.$template.$supportmacro then assignment.supplyfleet else assignment.defence"/>
+         <do_if value="$role == assignment.supplyfleet"><set_value name="$supportcount" operation="add" exact="1"/><do_if value="$e.$ship.type != shiptype.resupplier"><set_value name="$valid" exact="false"/></do_if></do_if>
+         <do_elseif value="$e.$ship.primarypurpose != purpose.fight"><set_value name="$valid" exact="false"/></do_elseif>
+         <do_if value="not $e.$ship.canuseassignment.{$role}.{$leader}"><set_value name="$valid" exact="false"/></do_if>
+        </do_if>
+       </do_for_each>
+       <do_if value="$supportcount != (if @$job.$template.$supportmacro != '' then 1 else 0)"><set_value name="$valid" exact="false"/></do_if>
+       <do_if value="not $valid"><set_value name="$job.$deploymentmessage" exact="'Chosen flagship or support role could not be verified. No assembly attempted.'"/></do_if>
+      </do_if>
       <do_for_each name="$d" in="global.$JKFOC_FleetDrafts"><do_if value="$d.$commander == $leader"><set_value name="$valid" exact="false"/></do_if></do_for_each>
      </do_if>
      <do_if value="$valid">
@@ -36,8 +53,17 @@
       <set_value name="$job.$state" exact="'ASSEMBLY IN PROGRESS'"/><set_value name="$assigned" exact="1"/>
       <do_for_each name="$e" in="$job.$ships" counter="$i">
        <do_if value="$i gt 1 and $valid">
-        <set_object_commander object="$e.$ship" commander="$leader" assignment="assignment.defence"/>
-        <do_if value="@$e.$ship.commander == $leader"><set_value name="$assigned" operation="add" exact="1"/></do_if>
+        <set_value name="$role" exact="if $shipyard and $e.$macro.id == @$job.$template.$supportmacro then assignment.supplyfleet else assignment.defence"/>
+        <set_object_commander object="$e.$ship" commander="$leader" assignment="$role"/>
+        <do_if value="@$e.$ship.commander == $leader and (not $shipyard or $e.$ship.assignment == $role)">
+         <do_if value="$shipyard">
+          <remove_value name="$follow"/>
+          <set_value name="$followid" exact="if $role == assignment.supplyfleet then 'SupplyFleet' else if $e.$ship.iscapitalship and not $leader.iscapitalship then 'ProtectShip' else 'Escort'"/>
+          <create_order name="$follow" object="$e.$ship" id="$followid" default="true"><param name="target" value="$leader"/></create_order>
+          <do_if value="not @$follow.exists or @$e.$ship.defaultorder != $follow or @$follow.$target != $leader"><set_value name="$valid" exact="false"/></do_if>
+         </do_if>
+         <do_if value="$valid"><set_value name="$assigned" operation="add" exact="1"/></do_if>
+        </do_if>
         <do_else><set_value name="$valid" exact="false"/></do_else>
        </do_if>
       </do_for_each>
@@ -46,13 +72,23 @@
        <set_value name="$draft" exact="table[$commander=$leader,$commanderidcode=$leader.idcode,$fleetname=$job.$template.$name,$homekey=$job.$homekey,$homename=$job.$home.knownname,$homesector=$job.$home,$homex=0,$homey=0,$homez=0,$fleetrole='PATROL',$coverage='HOME SECTOR ONLY',$sectorchoice='PLAYER OWNED ONLY',$patrolpattern='LOOP',$respondships='YES',$respondstations='YES',$distress='PLAYER OWNED ONLY',$urgency=1,$shipdamage=100,$stationdamage=100,$returnhome='YES',$manualoverride=true,$locked=false,$noncombatoverride=false,$schema=4,$savedat=player.age]"/>
        <append_to_list name="global.$JKFOC_FleetDrafts" exact="$draft"/>
        <set_value name="$job.$draft" exact="$draft"/>
+       <do_if value="$shipyard"><set_value name="$draft.$locked" exact="true"/></do_if>
        <remove_value name="$sent"/>
-       <create_order name="$sent" id="'Patrol'" object="$leader" default="true"><param name="space" value="$job.$home"/></create_order>
+       <do_if value="$shipyard">
+        <create_order name="$sent" id="'MoveWait'" object="$leader" default="true"><param name="destination" value="[$job.$home,position.[0m,0m,0m]]"/><param name="timeout" value="0s"/></create_order>
+       </do_if>
+       <do_else><create_order name="$sent" id="'Patrol'" object="$leader" default="true"><param name="space" value="$job.$home"/></create_order></do_else>
        <do_if value="@$sent.exists and @$leader.defaultorder == $sent and global.$JKFOC_FleetDrafts.indexof.{$draft} and $draft.$commander == $leader and $draft.$homesector == $job.$home and $draft.$homekey == $job.$homekey">
         <set_value name="$job.$order" exact="$sent"/><set_value name="$job.$state" exact="'FLEET ASSEMBLED - HOME PATROL ORDERED'"/>
         <set_value name="$job.$deploymentmessage" exact="'%1 ships assembled. Home: %2. Patrol submitted; arrival is not yet confirmed.'.[$assigned,$job.$home.knownname]"/>
+        <do_if value="$shipyard and $draft.$locked">
+         <set_value name="$draft.$shipyardready" exact="true"/>
+         <raise_lua_event name="'FOC_Menu.shipyard.ready'" param="$leader.idcode"/>
+         <set_value name="$job.$state" exact="'FLEET ASSEMBLED - READY FOR ASSIGNMENT'"/>
+         <set_value name="$job.$deploymentmessage" exact="'%1 ships assigned. Gathering at %2; arrival not confirmed. Choose this fleet in Fleets to set Home and send its first mission. Auxiliary supplies are not purchased by this action.'.[$assigned,$job.$home.knownname]"/>
+        </do_if>
        </do_if>
-       <do_else><set_value name="$job.$state" exact="'ASSEMBLED - PATROL READBACK FAILED'"/><set_value name="$job.$deploymentmessage" exact="'Fleet assembled and Home retained. Check the leader in X4; patrol was not confirmed. No automatic retry.'"/></do_else>
+       <do_else><set_value name="$job.$state" exact="if $shipyard then 'ASSEMBLED - GATHER READBACK FAILED' else 'ASSEMBLED - PATROL READBACK FAILED'"/><set_value name="$job.$deploymentmessage" exact="'Fleet assembled and location retained. Check the leader in X4; requested order was not confirmed. No automatic retry.'"/></do_else>
       </do_if>
       <do_else><set_value name="$job.$state" exact="'PARTIAL ASSEMBLY - CHECK SHIPS'"/><set_value name="$job.$deploymentmessage" exact="'%1 of %2 assignments confirmed. FOC stopped; no automatic replay or reassignment.'.[$assigned,$job.$total]"/></do_else>
       <do_for_each name="$e" in="$job.$ships"><do_if value="@$e.$ship.exists"><do_if value="$npc"><remove_from_group group="global.$JKFOC_NPCShips" object="$e.$ship"/></do_if><do_else><remove_from_group group="global.$JKFOC_ConstructionShips" object="$e.$ship"/></do_else></do_if></do_for_each>

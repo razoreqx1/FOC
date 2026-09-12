@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FOC_Workup" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <cues>
+  <!-- Configuration only. No construction, payment or transfer from this cue. -->
+  <cue name="Workup_Save" instantiate="true" namespace="this">
+   <conditions><event_ui_triggered screen="'FOC_Workup'" control="'save'"/></conditions>
+   <actions>
+    <signal_cue_instantly cue="md.FOC_Advisor.Advisor_Ensure"/>
+    <set_value name="$p" exact="event.param3"/><set_value name="$t" exact="null"/>
+    <do_for_each name="$candidate" in="global.$JKFOC_AdvisorTemplates"><do_if value="$candidate.$id == @$p.{1}"><set_value name="$t" exact="$candidate"/></do_if></do_for_each>
+    <set_value name="$valid" exact="$t and @$p.count ge 5 and @$p.count le 26 and ($p.count - 2) % 3 == 0 and (typeof @$p.{2}).isstring"/>
+    <set_value name="$crew" exact="[]"/><set_value name="$total" exact="0"/>
+    <do_if value="$valid">
+     <set_value name="$valid" exact="$t.$entries.count == ($p.count - 2) / 3"/>
+     <set_value name="$check" exact="table[$template=$t]"/><signal_cue_instantly cue="md.FOC_Procurement.Purchase_Conflict" param="$check"/>
+     <do_if value="not $check.$valid"><set_value name="$valid" exact="false"/></do_if>
+     <do_for_each name="$e" in="$t.$entries" counter="$i">
+      <set_value name="$offset" exact="3 + ($i - 1) * 3"/><set_value name="$service" exact="@$p.{$offset + 1}"/><set_value name="$marines" exact="@$p.{$offset + 2}"/>
+      <do_if value="@$p.{$offset} != $e.$macro or not (typeof $service).isnumeric or not (typeof $marines).isnumeric"><set_value name="$valid" exact="false"/></do_if>
+      <do_else>
+       <do_if value="$service lt 0 or $marines lt 0 or $service gt 100 or $marines gt 100 or $service != ($service)i or $marines != ($marines)i"><set_value name="$valid" exact="false"/></do_if>
+       <set_value name="$total" operation="add" exact="($service + $marines) * $e.$amount"/>
+       <append_to_list name="$crew" exact="table[$macro=$e.$macro,$service=$service,$marines=$marines,$amount=$e.$amount]"/>
+      </do_else>
+     </do_for_each>
+    </do_if>
+    <do_if value="$valid and $total le 100">
+     <set_value name="$t.$workup" exact="$p.{2}"/><set_value name="$t.$workupcrew" exact="$crew"/>
+     <raise_lua_event name="'FOC_Workup.saved'" param="$t.$workup"/>
+    </do_if>
+    <do_else><raise_lua_event name="'FOC_Workup.saved'" param="''"/></do_else>
+   </actions>
+  </cue>
+ </cues>
+</mdscript>
